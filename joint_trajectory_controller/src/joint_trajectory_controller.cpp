@@ -41,6 +41,9 @@
 #include "urdf/model.h"
 #endif
 
+#include <control_toolbox/filters.hpp>
+#include <hardware_interface/component_parser.hpp>
+
 namespace joint_trajectory_controller
 {
 JointTrajectoryController::JointTrajectoryController()
@@ -152,7 +155,8 @@ controller_interface::return_type JointTrajectoryController::update(
       RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
       return controller_interface::return_type::OK;
     }
-    scaling_factor_ = scaling_state_interface_op.value();
+    scaling_factor_ = filters::exponentialSmoothing(
+      scaling_state_interface_op.value(), scaling_factor_, params_.speed_scaling.filter_coefficient);;
   }
 
   if (scaling_command_interface_.has_value())
@@ -173,6 +177,8 @@ controller_interface::return_type JointTrajectoryController::update(
     {
       update_pids();
     }
+    // update the kinematic limits
+    update_kinematic_limits_from_parameters();
   }
 
   // don't update goal after we sampled the trajectory to avoid any race condition
@@ -1068,6 +1074,12 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
   update_period_ =
     rclcpp::Duration(0.0, static_cast<uint32_t>(1.0e9 / static_cast<double>(get_update_rate())));
 
+  // Extract the maximum velocity and acceleration from the urdf model
+  set_kinematic_limits_from_urdf();
+
+  // Extract the maximum velocity and acceleration from the parameter server
+  update_kinematic_limits_from_parameters();
+  
   return CallbackReturn::SUCCESS;
 }
 
@@ -1942,6 +1954,99 @@ void JointTrajectoryController::init_hold_position_msg()
     hold_position_msg_ptr_->points[0].effort.resize(dof_, 0.0);
   }
 }
+
+
+std::vector<hardware_interface::ComponentInfo> extract_joints_from_hardware_info(
+  const std::vector<hardware_interface::HardwareInfo> & hardware_infos)
+{
+  std::vector<hardware_interface::ComponentInfo> result;
+  for (const auto & hardware_info : hardware_infos)
+  {
+    std::copy(
+      hardware_info.joints.begin(), hardware_info.joints.end(), std::back_insert_iterator(result));
+  }
+  return result;
+}
+
+std::vector<hardware_interface::ComponentInfo> JointTrajectoryController::get_joints_from_urdf() const
+{
+  try
+  {
+    return extract_joints_from_hardware_info(
+      hardware_interface::parse_control_resources_from_urdf(get_robot_description()));
+  }
+  catch (const std::exception & e)
+  {
+    fprintf(stderr, "Exception thrown during extracting gpios info from urdf %s \n", e.what());
+    return {};
+  }
+}
+
+void JointTrajectoryController::set_kinematic_limits_from_urdf()
+{
+  const auto joints{get_joints_from_urdf()};
+  for (const auto & joint_name : params_.joints)
+  {
+    for (const auto & joint : joints)
+    {
+      if (joint_name == joint.name)
+      {
+        for(const auto & interface : joint.command_interfaces)
+        {
+          if(interface.name == "position")
+          {
+            //;
+          }
+          else if(interface.name == "velocity")
+          {
+            if(interface.max != "" && std::stod(interface.max) > 0.0)
+            {
+              max_velocities_[joint_name] = std::stod(interface.max);
+            }
+          }
+          else if(interface.name == "acceleration")
+          {
+            if(interface.max != "" && std::stod(interface.max) > 0.0)
+            {
+              max_accelerations_[joint_name] = std::stod(interface.max);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void JointTrajectoryController::update_kinematic_limits_from_parameters()
+  {
+    for (size_t i = 0; i < num_cmd_joints_; ++i)
+    {
+      const auto & limits = params_.limits.joints_map.at(params_.joints.at(map_cmd_to_joints_[i]));
+      if (limits.max_velocity > 0.0)
+      {
+        if( max_velocities_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_velocities_.end())
+        {
+          max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_velocity;
+        }
+        else
+        {
+          max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_velocity, max_velocities_[params_.joints.at(map_cmd_to_joints_[i])]);
+        }
+      }
+      if (limits.max_acceleration > 0.0)
+      {
+        if( max_accelerations_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_accelerations_.end())
+        {
+          max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_acceleration;
+        }
+        else
+        {
+          max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+        }
+        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+      }
+    }
+  }
 
 }  // namespace joint_trajectory_controller
 
