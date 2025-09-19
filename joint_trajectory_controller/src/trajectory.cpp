@@ -417,7 +417,6 @@ TrajectoryPointConstIter Trajectory::end() const
 }
 
 rclcpp::Time Trajectory::time_from_start() const { return trajectory_start_time_; }
-rclcpp::Time Trajectory::time_before_traj_msg() const { return time_before_traj_msg_; }
 
 bool Trajectory::has_trajectory_msg() const { return trajectory_msg_.get() != nullptr; }
 
