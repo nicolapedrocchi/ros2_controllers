@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
+#include "joint_trajectory_controller/trajectory_utils.hpp"
+
 
 #include <chrono>
 #include <functional>
@@ -205,6 +207,9 @@ controller_interface::return_type JointTrajectoryController::update(
   // currently carrying out a trajectory
   if (has_active_trajectory())
   {
+    rclcpp::Time traj_time;
+    double feasible_scaling = 1.0;
+    double feasible_scaling_derivative = 1.0;
     bool first_sample = false;
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // if sampling the first time, set the point before you sample
@@ -225,24 +230,30 @@ controller_interface::return_type JointTrajectoryController::update(
         current_trajectory_->set_point_before_trajectory_msg(
           time, state_current_, joints_angle_wraparound_);
       }
-      traj_time_ = time;
+      traj_time = time;
+      feasible_scaling = scaling_factor_.load();
     }
     else
     {
-      traj_time_ += period * scaling_factor_.load();
+      std::tie(traj_time, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = compute_interval_and_scaling(
+        current_trajectory_->get_trajectory_msg(), current_trajectory_->time_from_start(), time, period);
+      //traj_time = traj_time_prev_ + period * scaling_factor_.load();
     }
 
     // Sample expected state from the trajectory
     current_trajectory_->sample(
-      traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
-    state_desired_.time_from_start = traj_time_ - current_trajectory_->time_from_start();
+      traj_time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
+    state_desired_.time_from_start = traj_time - current_trajectory_->time_from_start();
+    trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,state_desired_);
 
     const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
 
     // Sample setpoint for next control cycle
     const bool valid_point = current_trajectory_->sample(
-      traj_time_ + update_period_, interpolation_method_, command_next_, start_segment_itr,
+      traj_time + update_period_, interpolation_method_, command_next_, start_segment_itr,
       end_segment_itr, false);
+
+    trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,command_next_);
 
     state_current_.time_from_start = time - current_trajectory_->time_from_start();
 
@@ -256,7 +267,7 @@ controller_interface::return_type JointTrajectoryController::update(
       // time_difference is
       // - negative until first point is reached
       // - counting from zero to time_from_start of next point
-      double time_difference = traj_time_.seconds() - segment_time_from_start.seconds();
+      double time_difference = traj_time.seconds() - segment_time_from_start.seconds();
       bool tolerance_violated_while_moving = false;
       bool outside_goal_tolerance = false;
       bool within_goal_time = true;
@@ -2018,35 +2029,74 @@ void JointTrajectoryController::set_kinematic_limits_from_urdf()
 }
 
 void JointTrajectoryController::update_kinematic_limits_from_parameters()
+{
+  for (size_t i = 0; i < num_cmd_joints_; ++i)
   {
-    for (size_t i = 0; i < num_cmd_joints_; ++i)
+    const auto & limits = params_.limits.joints_map.at(params_.joints.at(map_cmd_to_joints_[i]));
+    if (limits.max_velocity > 0.0)
     {
-      const auto & limits = params_.limits.joints_map.at(params_.joints.at(map_cmd_to_joints_[i]));
-      if (limits.max_velocity > 0.0)
+      if( max_velocities_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_velocities_.end())
       {
-        if( max_velocities_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_velocities_.end())
-        {
-          max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_velocity;
-        }
-        else
-        {
-          max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_velocity, max_velocities_[params_.joints.at(map_cmd_to_joints_[i])]);
-        }
+        max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_velocity;
       }
-      if (limits.max_acceleration > 0.0)
+      else
       {
-        if( max_accelerations_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_accelerations_.end())
-        {
-          max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_acceleration;
-        }
-        else
-        {
-          max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
-        }
-        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+        max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_velocity, max_velocities_[params_.joints.at(map_cmd_to_joints_[i])]);
       }
     }
+    if (limits.max_acceleration > 0.0)
+    {
+      if( max_accelerations_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_accelerations_.end())
+      {
+        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_acceleration;
+      }
+      else
+      {
+        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+      }
+      max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+    }
   }
+}
+
+std::tuple<rclcpp::Time,double, double, TrajectoryPointConstIter, TrajectoryPointConstIter> JointTrajectoryController::compute_interval_and_scaling(
+  const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
+  const rclcpp::Time & trajectory_start_time, const rclcpp::Time & sample_time, const rclcpp::Duration & period)
+{
+  auto offset = [&trajectory_start_time] (const rclcpp::Time& t) -> rclcpp::Time
+  {
+    return rclcpp::Time(0, 0, t.get_clock_type()) + (t - trajectory_start_time);
+  };
+
+  rclcpp::Time tau_i = sample_time + period * scaling_factor_.load();
+  double dtau_i = scaling_factor_.load();
+  double dtau_i_1 = prev_scaling_factor_;
+  
+  auto tau_i_1 = offset(sample_time);
+  while (true)
+  {
+    tau_i = tau_i_1 + period * dtau_i;
+    auto [k_1_itr, k_itr] = trajectory_utils::find_segment(trajectory_msg, tau_i);
+
+    auto v_k = trajectory_utils::multiply(dtau_i, k_itr->velocities);
+    if(1 == trajectory_utils::leqt(max_velocities_, trajectory_msg->joint_names, v_k,true))
+    {
+      auto ddtau_i = (dtau_i-dtau_i_1)/period.seconds();
+      auto a_k_first_term = trajectory_utils::multiply(dtau_i*dtau_i, k_itr->accelerations);
+      auto a_k_second_term = trajectory_utils::multiply(ddtau_i, k_itr->velocities);
+      if(1 == trajectory_utils::leqt(max_accelerations_, trajectory_msg->joint_names, trajectory_utils::add(a_k_first_term, a_k_second_term),true))
+      {
+        return {tau_i, dtau_i, dtau_i_1, k_1_itr, k_itr};
+      }
+    }
+
+    dtau_i = 0.95*dtau_i;
+  }
+  
+
+  return {tau_i, dtau_i, 0, trajectory_msg->points.end(), trajectory_msg->points.end()};
+}
+  
 
 }  // namespace joint_trajectory_controller
 

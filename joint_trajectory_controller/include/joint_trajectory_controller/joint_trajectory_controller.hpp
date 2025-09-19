@@ -114,7 +114,7 @@ protected:
   Params params_;
   rclcpp::Duration update_period_{0, 0};
 
-  rclcpp::Time traj_time_;
+  rclcpp::Time traj_time_prev_;
 
   // variables for storing internal data for open-loop control
   trajectory_msgs::msg::JointTrajectoryPoint last_commanded_state_;
@@ -159,8 +159,15 @@ protected:
   // Things around speed scaling
   std::atomic<double> scaling_factor_{1.0};
   std::atomic<double> scaling_factor_cmd_{1.0};
+  double prev_scaling_factor_{1.0};
   std::map<std::string, double> max_velocities_;
   std::map<std::string, double> max_accelerations_;
+
+  
+  std::tuple<rclcpp::Time, double, double, TrajectoryPointConstIter, TrajectoryPointConstIter> compute_interval_and_scaling(
+    const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
+    const rclcpp::Time & trajectory_start_time, const rclcpp::Time & prev_sample_time, const rclcpp::Duration & period);
+
 
   // Timeout to consider commands old
   double cmd_timeout_;

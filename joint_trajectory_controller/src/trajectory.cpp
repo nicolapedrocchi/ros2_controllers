@@ -87,6 +87,63 @@ void Trajectory::update(std::shared_ptr<trajectory_msgs::msg::JointTrajectory> j
   last_sample_idx_ = 0;
 }
 
+bool get_interval(
+  const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
+  const rclcpp::Time & trajectory_start_time,
+  const rclcpp::Time & sample_time,
+  TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr)
+{
+  if(!trajectory_msg)
+  {
+    return false;
+  }
+
+  if (trajectory_msg->points.empty())
+  {
+    start_segment_itr = trajectory_msg->points.end();
+    end_segment_itr = trajectory_msg->points.end();
+    return false;
+  }
+
+
+  auto & first_point_in_msg = trajectory_msg->points[0];
+  const rclcpp::Time first_point_timestamp = trajectory_start_time + first_point_in_msg.time_from_start;
+
+  // current time hasn't reached traj time of the first point in the msg yet
+  if (sample_time < first_point_timestamp)
+  {
+    start_segment_itr = trajectory_msg->points.begin();  // no segments before the first
+    end_segment_itr = trajectory_msg->points.begin();
+    return true;
+  }
+
+  // time_from_start + trajectory time is the expected arrival time of trajectory
+  const auto last_idx = trajectory_msg->points.size() - 1;
+  for (size_t i = 0; i < last_idx; ++i)
+  {
+    auto & point = trajectory_msg->points[i];
+    auto & next_point = trajectory_msg->points[i + 1];
+
+    const rclcpp::Time t0 = trajectory_start_time + point.time_from_start;
+    const rclcpp::Time t1 = trajectory_start_time + next_point.time_from_start;
+
+    if (sample_time >= t0 && sample_time < t1)
+    {
+      // If interpolation is disabled, just forward the next waypoint
+      start_segment_itr = trajectory_msg->points.begin() + static_cast<TrajectoryPointConstIter::difference_type>(i);
+      end_segment_itr = trajectory_msg->points.begin() + static_cast<TrajectoryPointConstIter::difference_type>(i + 1);
+      return true;
+    }
+  }
+
+  // whole animation has played out
+  start_segment_itr = --trajectory_msg->points.end();
+  end_segment_itr = trajectory_msg->points.end();
+
+  return true;
+}
+
+
 bool Trajectory::sample(
   const rclcpp::Time & sample_time,
   const interpolation_methods::InterpolationMethod interpolation_method,
@@ -417,6 +474,7 @@ TrajectoryPointConstIter Trajectory::end() const
 }
 
 rclcpp::Time Trajectory::time_from_start() const { return trajectory_start_time_; }
+rclcpp::Time Trajectory::time_before_traj_msg() const { return time_before_traj_msg_; }
 
 bool Trajectory::has_trajectory_msg() const { return trajectory_msg_.get() != nullptr; }
 

@@ -131,7 +131,8 @@ public:
   TrajectoryPointConstIter end() const;
 
   rclcpp::Time time_from_start() const;
-
+  rclcpp::Time time_before_traj_msg() const;
+  
   bool has_trajectory_msg() const;
 
   bool has_nontrivial_msg() const;
@@ -165,6 +166,13 @@ private:
   bool sampled_already_ = false;
   size_t last_sample_idx_ = 0;
 };
+
+/// Get the segment (made up of 2 points) in the trajectory message containing the given time.
+// sample time must be in the trajectory time window
+bool get_interval(
+    const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
+    const rclcpp::Time & sample_time,
+    TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr);
 
 /**
  * \return The map between \p t1 indices (implicitly encoded in return vector indices) to \p t2
