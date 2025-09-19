@@ -131,7 +131,6 @@ public:
   TrajectoryPointConstIter end() const;
 
   rclcpp::Time time_from_start() const;
-  rclcpp::Time time_before_traj_msg() const;
   
   bool has_trajectory_msg() const;
 
