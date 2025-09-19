@@ -114,7 +114,7 @@ protected:
   Params params_;
   rclcpp::Duration update_period_{0, 0};
 
-  rclcpp::Time traj_time_prev_;
+  rclcpp::Time traj_time_;
 
   // variables for storing internal data for open-loop control
   trajectory_msgs::msg::JointTrajectoryPoint last_commanded_state_;

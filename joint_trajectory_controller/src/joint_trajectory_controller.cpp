@@ -207,7 +207,6 @@ controller_interface::return_type JointTrajectoryController::update(
   // currently carrying out a trajectory
   if (has_active_trajectory())
   {
-    rclcpp::Time traj_time;
     double feasible_scaling = 1.0;
     double feasible_scaling_derivative = 1.0;
     bool first_sample = false;
@@ -230,27 +229,27 @@ controller_interface::return_type JointTrajectoryController::update(
         current_trajectory_->set_point_before_trajectory_msg(
           time, state_current_, joints_angle_wraparound_);
       }
-      traj_time = time;
+      traj_time_ = time;
       feasible_scaling = scaling_factor_.load();
     }
     else
     {
-      std::tie(traj_time, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = compute_interval_and_scaling(
+      std::tie(traj_time_, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = compute_interval_and_scaling(
         current_trajectory_->get_trajectory_msg(), current_trajectory_->time_from_start(), time, period);
-      //traj_time = traj_time_prev_ + period * scaling_factor_.load();
+      //traj_time_ = traj_time_prev_ + period * scaling_factor_.load();
     }
 
     // Sample expected state from the trajectory
     current_trajectory_->sample(
-      traj_time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
-    state_desired_.time_from_start = traj_time - current_trajectory_->time_from_start();
+      traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
+    state_desired_.time_from_start = traj_time_ - current_trajectory_->time_from_start();
     trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,state_desired_);
 
     const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
 
     // Sample setpoint for next control cycle
     const bool valid_point = current_trajectory_->sample(
-      traj_time + update_period_, interpolation_method_, command_next_, start_segment_itr,
+      traj_time_ + update_period_, interpolation_method_, command_next_, start_segment_itr,
       end_segment_itr, false);
 
     trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,command_next_);
@@ -267,7 +266,7 @@ controller_interface::return_type JointTrajectoryController::update(
       // time_difference is
       // - negative until first point is reached
       // - counting from zero to time_from_start of next point
-      double time_difference = traj_time.seconds() - segment_time_from_start.seconds();
+      double time_difference = traj_time_.seconds() - segment_time_from_start.seconds();
       bool tolerance_violated_while_moving = false;
       bool outside_goal_tolerance = false;
       bool within_goal_time = true;
