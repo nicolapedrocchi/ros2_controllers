@@ -344,6 +344,8 @@ private:
       }
     }
   }
+
+  bool cleanup();
 };
 
 }  // namespace joint_trajectory_controller

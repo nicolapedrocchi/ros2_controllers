@@ -15,6 +15,7 @@
 #ifndef TEST_TRAJECTORY_CONTROLLER_UTILS_HPP_
 #define TEST_TRAJECTORY_CONTROLLER_UTILS_HPP_
 
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -289,8 +290,9 @@ public:
     node_options.parameter_overrides(parameter_overrides);
     traj_controller_->set_node_options(node_options);
 
-    return traj_controller_->init(
+    auto ret = traj_controller_->init(
       controller_name_, urdf, 100, "", traj_controller_->define_custom_node_options());
+    return ret;
   }
 
   void SetPidParameters(double p_value = 0.0, double ff_value = 1.0)

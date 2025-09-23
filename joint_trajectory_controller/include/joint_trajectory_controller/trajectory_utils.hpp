@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <rclcpp/duration.hpp>
 #include <rclcpp/time.hpp>
 #include <vector>
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
@@ -19,8 +20,35 @@ namespace trajectory_utils
 inline
 std::tuple<TrajectoryPointConstIter, TrajectoryPointConstIter> find_segment(
   const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg, 
+  const rclcpp::Duration& time_from_start)
+{
+  TrajectoryPointConstIter start_segment_itr = trajectory_msg->points.end();
+  TrajectoryPointConstIter end_segment_itr = trajectory_msg->points.end();
+  // time_from_start + trajectory time is the expected arrival time of trajectory
+  const auto last_idx = trajectory_msg->points.size() - 1;
+  for (size_t i = 0; i < last_idx; ++i)
+  {
+    auto & point = trajectory_msg->points[i];
+    auto & next_point = trajectory_msg->points[i + 1];
+
+    const rclcpp::Duration t0 =point.time_from_start;
+    const rclcpp::Duration t1 = next_point.time_from_start;
+
+    if (time_from_start >= t0 && time_from_start < t1)
+    {
+      // If int
+      start_segment_itr = trajectory_msg->points.begin() + static_cast<TrajectoryPointConstIter::difference_type>(i);
+      end_segment_itr = trajectory_msg->points.begin() + static_cast<TrajectoryPointConstIter::difference_type>(i + 1);
+    }
+  }
+  return {start_segment_itr, end_segment_itr};
+}
+
+inline
+std::tuple<TrajectoryPointConstIter, TrajectoryPointConstIter> find_segment(
+  const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg, 
   const rclcpp::Time& sample_time, 
-  const rclcpp::Time& trajectory_start_time = rclcpp::Time(0,0))
+  const rclcpp::Time& trajectory_start_time)
 {
   TrajectoryPointConstIter start_segment_itr = trajectory_msg->points.end();
   TrajectoryPointConstIter end_segment_itr = trajectory_msg->points.end();

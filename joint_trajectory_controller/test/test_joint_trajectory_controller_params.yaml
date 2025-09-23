@@ -10,3 +10,14 @@ test_joint_trajectory_controller:
 
     state_interfaces:
       - position
+
+    speed_scaling:
+      filter_coefficient: 0.9
+
+    limits:
+      joint1:
+        max_velocity: 1.0
+        max_acceleration: 1.0
+      joint2:
+        max_velocity: 1.0
+        max_acceleration: 1.0

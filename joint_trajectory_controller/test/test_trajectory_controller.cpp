@@ -2661,7 +2661,7 @@ TEST_F(TrajectoryControllerTest, setting_scaling_factor_works_correctly)
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
 
-  updateController();
+  updateController(rclcpp::Duration::from_seconds(10.0));
 
   // Spin to receive latest state
   executor.spin_some();
