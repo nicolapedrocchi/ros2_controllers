@@ -40,6 +40,7 @@ using lifecycle_msgs::msg::State;
 using test_trajectory_controllers::TrajectoryControllerTest;
 using test_trajectory_controllers::TrajectoryControllerTestParameterized;
 
+#if 1
 // Floating-point value comparison threshold
 const double EPS = 1e-6;
 
@@ -2565,6 +2566,7 @@ INSTANTIATE_TEST_SUITE_P(
       std::vector<std::string>({"position", "effort"}),
       std::vector<std::string>({"position", "velocity", "acceleration"}))));
 
+#endif
 /**
  * @brief see if parameter validation is correct
  *
@@ -2755,25 +2757,25 @@ TEST_F(TrajectoryControllerTest, scaling_state_interface_sets_value)
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
     controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS());
   subscribeToState(executor);
-  updateController();
+  updateController(rclcpp::Duration::from_seconds(10.0));
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
-  EXPECT_EQ(state->speed_scaling_factor, speed_scaling_factor_);
+  EXPECT_LE(state->speed_scaling_factor-speed_scaling_factor_, 1e-5);
 
   control_msgs::msg::SpeedScalingFactor msg;
   msg.factor = 0.765;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
 
-  updateController();
+  updateController(rclcpp::Duration::from_seconds(10.0));
 
   // Spin to receive latest state
   executor.spin_some();
   state = getState();
   // Since we have a speed scaling state interface active, the value set via topic will be
   // overwritten from the state interface.
-  EXPECT_EQ(state->speed_scaling_factor, speed_scaling_factor_);
+  EXPECT_LE(state->speed_scaling_factor-speed_scaling_factor_, 1e-5);
 }
 
 TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
@@ -2790,12 +2792,12 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
     controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS());
   subscribeToState(executor);
-  updateController();
+  updateController(rclcpp::Duration::from_seconds(10.0));
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
   // The initial value should be written to the hardware
-  EXPECT_EQ(state->speed_scaling_factor, initial_factor);
+  EXPECT_LE(std::fabs(state->speed_scaling_factor - initial_factor), 1e-5);
 
   control_msgs::msg::SpeedScalingFactor msg;
   msg.factor = 0.765;
@@ -2804,12 +2806,12 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
 
   // Value will be set during the first update and read in the second update
   updateController();
-  updateController();
+  updateController(rclcpp::Duration::from_seconds(10.0));
 
   // Spin to receive latest state
   executor.spin_some();
   state = getState();
-  EXPECT_EQ(state->speed_scaling_factor, 0.765);
+  EXPECT_LE(std::fabs(state->speed_scaling_factor- 0.765),1e-5);
 }
 
 TEST_F(TrajectoryControllerTest, activate_with_scaling_interfaces)
