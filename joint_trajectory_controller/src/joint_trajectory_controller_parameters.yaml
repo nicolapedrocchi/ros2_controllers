@@ -61,7 +61,11 @@ joint_trajectory_controller:
     filter_coefficient: {
       type: double,
       default_value: 0.05,
-      description: "Specifies the filter coefficient for the scaling factor exponential filter."
+      description: "Specifies the filter coefficient for the scaling factor exponential filter.",
+      validation: {
+        gt_eq<>: 0.0,
+        lt_eq<>: 1.0,
+      }
     },
 
     state_interface: {
@@ -91,7 +95,7 @@ joint_trajectory_controller:
         default_value: 0.0,
         description: "Max acceleration that override the URDF field. Accepted only if less than the URDF value, if present",
       }
-  
+
   allow_partial_joints_goal: {
     type: bool,
     default_value: false,

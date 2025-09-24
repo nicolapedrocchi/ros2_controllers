@@ -172,8 +172,7 @@ controller_interface::return_type JointTrajectoryController::update(
       RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
       return controller_interface::return_type::OK;
     }
-    scaling_factor_ = scaling_state_interface_op.value();
-    //filters::exponentialSmoothing( scaling_state_interface_op.value(), scaling_factor_, params_.speed_scaling.filter_coefficient);;
+    scaling_factor_ = filters::exponentialSmoothing( scaling_state_interface_op.value(), scaling_factor_, params_.speed_scaling.filter_coefficient);
   }
 
   if (scaling_command_interface_.has_value())

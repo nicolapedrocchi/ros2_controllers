@@ -12,7 +12,7 @@ test_joint_trajectory_controller:
       - position
 
     speed_scaling:
-      filter_coefficient: 0.9
+      filter_coefficient: 0.05
 
     limits:
       joint1:
