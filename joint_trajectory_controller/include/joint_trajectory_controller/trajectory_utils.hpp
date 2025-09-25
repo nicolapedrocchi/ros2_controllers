@@ -142,7 +142,6 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
   // ========
   do
   {
-    std::cout << "--------- sample time: " << tau_i.seconds() << std::endl;
     std::tie(k_1_itr, k_itr) = trajectory_utils::find_segment(trajectory_msg, tau_i);
     if(k_itr == trajectory_msg->points.end())
     {

@@ -1101,7 +1101,7 @@ TEST(TestTrajectoryUtils, compute_interval_and_scaling_no_input_vel_acc)
   double scaling_factor = 1.0;
   double prev_scaling_factor = 1.0;
   
-  std::vector<double> knot_times{1.0, 2.0, 3.0, 4.5, 6.0};
+  std::vector<double> knot_times{1.0, 2.0, 3.0};
   for(const auto & t : knot_times)
   {
     trajectory_msgs::msg::JointTrajectoryPoint p;
@@ -1125,15 +1125,14 @@ TEST(TestTrajectoryUtils, compute_interval_and_scaling_no_input_vel_acc)
     {rclcpp::Duration(1,500e6)-dt, {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
     {rclcpp::Duration(1,500e6)   , {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
     {rclcpp::Duration(2,500e6)-dt, {dtau,ddtau,full_msg->points.begin()+1,full_msg->points.begin()+2}},
-    {rclcpp::Duration(3,000e6)-dt, {dtau,ddtau,full_msg->points.end()  -1,full_msg->points.end()  }},
-    // {rclcpp::Time(3,125e6)-dt, {0,0,full_msg->points.end()  -1,full_msg->points.end()    }},
-    // {rclcpp::Time(3,000e6)-dt, {0,0,full_msg->points.end()  -1,full_msg->points.end()    }}
+    {rclcpp::Duration(3,000e6)-dt, {dtau,ddtau,full_msg->points.end()  -1,full_msg->points.end()    }},
+    {rclcpp::Duration(3,125e6)-dt, {dtau,ddtau,full_msg->points.end()  -1,full_msg->points.end()    }},
+    {rclcpp::Duration(3,000e6)-dt, {dtau,ddtau,full_msg->points.end()  -1,full_msg->points.end()    }}
   };
 
   // check if the interval is properly computed with scaling factor 1.0
   for(const auto& sample : samples)
   {
-    std::cout << "sample time: " << sample.first.seconds() << "s" << ",\tscaling_factor:" << scaling_factor << ",\tprev_scaling_factor:" << prev_scaling_factor << std::endl;
     auto [traj_time, feasible_scaling, feasible_scaling_derivative, start, end] = 
             joint_trajectory_controller::trajectory_utils::compute_interval_and_scaling(
               full_msg, sample.first, dt, scaling_factor, prev_scaling_factor, max_velocities, max_accelerations);
