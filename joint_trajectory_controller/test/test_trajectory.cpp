@@ -1078,3 +1078,70 @@ TEST(TestTrajectoryUtils, multiply)
     EXPECT_EQ(c[i], b[i]);
   }
 }
+
+
+TEST(TestTrajectoryUtils, compute_interval_and_scaling_no_input_vel_acc)
+{
+  std::vector<std::string> joint_names{"joint_1","joint_2","joint_3"};
+
+  std::map<std::string, double> max_velocities{
+  {"joint_1", 1.0},
+  {"joint_2", 2.0},
+  {"joint_3", 3.0}
+  };
+  std::map<std::string, double> max_accelerations{
+  {"joint_1", 1.0},
+  {"joint_2", 2.0},
+  {"joint_3", 3.0}
+  };
+
+  auto full_msg = std::make_shared<trajectory_msgs::msg::JointTrajectory>();
+  full_msg->header.stamp = rclcpp::Time(0);
+
+  double scaling_factor = 1.0;
+  double prev_scaling_factor = 1.0;
+  
+  std::vector<double> knot_times{1.0, 2.0, 3.0, 4.5, 6.0};
+  for(const auto & t : knot_times)
+  {
+    trajectory_msgs::msg::JointTrajectoryPoint p;
+    p.positions.push_back(t);
+    p.time_from_start = rclcpp::Duration::from_seconds(t);
+    full_msg->points.push_back(p);
+  }
+
+  rclcpp::Duration dt = rclcpp::Duration::from_seconds(0.01);
+
+  double dtau = scaling_factor;
+  double ddtau = 0.0;
+  
+  std::vector<
+    std::pair<rclcpp::Duration, 
+      std::tuple<double, double, joint_trajectory_controller::TrajectoryPointConstIter,joint_trajectory_controller::TrajectoryPointConstIter>>> samples{ 
+    {rclcpp::Duration(0,000e6)   , {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+0}}, 
+    {rclcpp::Duration(0,500e6)   , {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+0}},
+    {rclcpp::Duration(1,000e6)-dt, {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
+    {rclcpp::Duration(1,000e6)   , {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
+    {rclcpp::Duration(1,500e6)-dt, {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
+    {rclcpp::Duration(1,500e6)   , {dtau,ddtau,full_msg->points.begin()+0,full_msg->points.begin()+1}},
+    {rclcpp::Duration(2,500e6)-dt, {dtau,ddtau,full_msg->points.begin()+1,full_msg->points.begin()+2}},
+    {rclcpp::Duration(3,000e6)-dt, {dtau,ddtau,full_msg->points.end()  -1,full_msg->points.end()  }},
+    // {rclcpp::Time(3,125e6)-dt, {0,0,full_msg->points.end()  -1,full_msg->points.end()    }},
+    // {rclcpp::Time(3,000e6)-dt, {0,0,full_msg->points.end()  -1,full_msg->points.end()    }}
+  };
+
+  // check if the interval is properly computed with scaling factor 1.0
+  for(const auto& sample : samples)
+  {
+    std::cout << "sample time: " << sample.first.seconds() << "s" << ",\tscaling_factor:" << scaling_factor << ",\tprev_scaling_factor:" << prev_scaling_factor << std::endl;
+    auto [traj_time, feasible_scaling, feasible_scaling_derivative, start, end] = 
+            joint_trajectory_controller::trajectory_utils::compute_interval_and_scaling(
+              full_msg, sample.first, dt, scaling_factor, prev_scaling_factor, max_velocities, max_accelerations);
+
+    ASSERT_EQ(std::get<0>(sample.second), dtau);
+    ASSERT_EQ(std::get<1>(sample.second), ddtau);
+    ASSERT_EQ(std::get<2>(sample.second), start);
+    ASSERT_EQ(std::get<3>(sample.second), end);
+  }
+
+}

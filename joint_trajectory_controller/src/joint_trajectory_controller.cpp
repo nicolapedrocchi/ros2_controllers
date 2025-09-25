@@ -246,10 +246,21 @@ controller_interface::return_type JointTrajectoryController::update(
       traj_time_ = time;
       feasible_scaling = scaling_factor_.load();
     }
-    else
+    else // the trajectory has been sampled, i.e., the sample function has been called!
     {
-      std::tie(traj_time_, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = compute_interval_and_scaling(
-        current_trajectory_->get_trajectory_msg(), current_trajectory_->time_from_start(), time, period);
+      if (traj_time_ < current_trajectory_->time_from_start())
+      {
+        traj_time_ = traj_time_ + period;
+      }
+      else
+      {
+        auto time_from_start = time - current_trajectory_->time_from_start();
+        std::tie(time_from_start, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
+          current_trajectory_->get_trajectory_msg(), time_from_start, period, scaling_factor_.load(), prev_scaling_factor_, max_velocities_, max_accelerations_);
+        traj_time_ = current_trajectory_->time_from_start() + time_from_start;
+        prev_scaling_factor_ = feasible_scaling;
+      }
+      
       //traj_time_ = traj_time_prev_ + period * scaling_factor_.load();
     }
 
@@ -2070,75 +2081,6 @@ void JointTrajectoryController::update_kinematic_limits_from_parameters()
       max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
     }
   }
-}
-
-std::tuple<rclcpp::Time,double, double, TrajectoryPointConstIter, TrajectoryPointConstIter> JointTrajectoryController::compute_interval_and_scaling(
-  const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
-  const rclcpp::Time & trajectory_start_time, const rclcpp::Time & sample_time, const rclcpp::Duration & period)
-{
-  std::size_t ll = __LINE__;
-  #define LL ll=__LINE__
-  try
-  {  
-    LL;
-    if(sample_time < trajectory_start_time)
-    {
-      // before start of trajectory
-      return {trajectory_start_time, 1.0, 0.0, trajectory_msg->points.begin(), trajectory_msg->points.begin()};
-    }
-
-    double dtau_i = scaling_factor_.load();
-    double dtau_i_1 = prev_scaling_factor_;
-    rclcpp::Duration tau_i_1 = sample_time - trajectory_start_time;
-    while (true)
-    {
-      LL;
-      rclcpp::Duration tau_i  = tau_i_1 + period * dtau_i;
-      auto [k_1_itr, k_itr] = trajectory_utils::find_segment(trajectory_msg, tau_i);
-      if(k_itr == trajectory_msg->points.end() || k_1_itr == trajectory_msg->points.end())
-      {
-        // end of trajectory reached
-        return {tau_i + trajectory_start_time, dtau_i, dtau_i_1, k_1_itr, k_itr};
-      }
-      LL;
-      std::vector<double> v_k(trajectory_msg->joint_names.size(), 0.0);
-      std::vector<double> a_k(trajectory_msg->joint_names.size(), 0.0);
-      if(!k_itr->velocities.empty()) 
-      {
-        v_k = std::vector<double>(trajectory_msg->joint_names.size(), 0.0);
-      }
-      if(!k_itr->accelerations.empty()) 
-      {
-        a_k = std::vector<double>(trajectory_msg->joint_names.size(), 0.0);
-      }
-      LL;
-      if(1 == trajectory_utils::leqt(
-        max_velocities_, 
-        trajectory_msg->joint_names, 
-        trajectory_utils::multiply(dtau_i, v_k),
-        true))
-      {
-        auto ddtau_i = (dtau_i-dtau_i_1)/period.seconds();
-        auto a_k_first_term = trajectory_utils::multiply(dtau_i*dtau_i, a_k);
-        auto a_k_second_term = trajectory_utils::multiply(ddtau_i, v_k);
-        LL;
-        if(1 == trajectory_utils::leqt(max_accelerations_, trajectory_msg->joint_names, trajectory_utils::add(a_k_first_term, a_k_second_term),true))
-        {
-          return {tau_i + trajectory_start_time, dtau_i, dtau_i_1, k_1_itr, k_itr};
-        }
-      }
-      LL;
-      dtau_i = 0.95*dtau_i;
-    }
-  }
-  catch(const std::exception & e)
-  {
-    RCLCPP_ERROR(
-      get_node()->get_logger(), "Exception thrown during compute_interval_and_scaling at line %zu: %s", ll, e.what());
-  }
-  
-
-  return {trajectory_msg->points.back().time_from_start + trajectory_start_time, 1.0, 0, trajectory_msg->points.end(), trajectory_msg->points.end()};
 }
 
 bool JointTrajectoryController::cleanup()

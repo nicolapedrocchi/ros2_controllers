@@ -162,13 +162,7 @@ protected:
   double prev_scaling_factor_{1.0};
   std::map<std::string, double> max_velocities_;
   std::map<std::string, double> max_accelerations_;
-
   
-  std::tuple<rclcpp::Time, double, double, TrajectoryPointConstIter, TrajectoryPointConstIter> compute_interval_and_scaling(
-    const std::shared_ptr<trajectory_msgs::msg::JointTrajectory>& trajectory_msg,
-    const rclcpp::Time & trajectory_start_time, const rclcpp::Time & prev_sample_time, const rclcpp::Duration & period);
-
-
   // Timeout to consider commands old
   double cmd_timeout_;
   // True if holding position or repeating last trajectory point in case of success
