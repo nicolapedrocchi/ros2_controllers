@@ -17,17 +17,21 @@
 
 
 #include <chrono>
+#include <controller_interface/controller_interface_base.hpp>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <functional>
 
 #include "angles/angles.h"
 #include "controller_interface/helpers.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "joint_trajectory_controller/trajectory.hpp"
+#include "joint_trajectory_controller/utils.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/qos.hpp"
@@ -77,8 +81,6 @@ controller_interface::CallbackReturn JointTrajectoryController::on_init()
   catch (const std::exception & e)
   {
     fprintf(stderr, "Exception thrown during init stage with message: %s \n", e.what());
-    reset();
-    cleanup();
     return CallbackReturn::ERROR;
   }
 
@@ -164,20 +166,16 @@ controller_interface::return_type JointTrajectoryController::update(
   const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   auto logger = this->get_node()->get_logger();
-  if (scaling_state_interface_.has_value())
+  
+  
+  if(update_scaling_factor() == controller_interface::return_type::ERROR)
   {
-    auto scaling_state_interface_op = scaling_state_interface_->get().get_optional();
-    if (!scaling_state_interface_op.has_value())
-    {
-      RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
-      return controller_interface::return_type::OK;
-    }
-    scaling_factor_ = filters::exponentialSmoothing( scaling_state_interface_op.value(), scaling_factor_, params_.speed_scaling.filter_coefficient);
+    return controller_interface::return_type::OK;
   }
 
   if (scaling_command_interface_.has_value())
   {
-    if (!scaling_command_interface_->get().set_value(scaling_factor_cmd_.load()))
+    if (!scaling_command_interface_->get().set_value(filtered_scaling_factor_))
     {
       RCLCPP_ERROR(logger, "Could not set speed scaling factor through command interfaces.");
     }
@@ -221,11 +219,11 @@ controller_interface::return_type JointTrajectoryController::update(
   // currently carrying out a trajectory
   if (has_active_trajectory())
   {
-    double feasible_scaling = 1.0;
     double feasible_scaling_derivative = 1.0;
     bool first_sample = false;
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // if sampling the first time, set the point before you sample
+    
     if (!current_trajectory_->is_sampled_already())
     {
       first_sample = true;
@@ -244,7 +242,7 @@ controller_interface::return_type JointTrajectoryController::update(
           time, state_current_, joints_angle_wraparound_);
       }
       traj_time_ = time;
-      feasible_scaling = scaling_factor_.load();
+      feasible_scaling_factor_ = filtered_scaling_factor_;
     }
     else // the trajectory has been sampled, i.e., the sample function has been called!
     {
@@ -254,21 +252,18 @@ controller_interface::return_type JointTrajectoryController::update(
       }
       else
       {
-        auto time_from_start = time - current_trajectory_->time_from_start();
-        std::tie(time_from_start, feasible_scaling, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
-          current_trajectory_->get_trajectory_msg(), time_from_start, period, scaling_factor_.load(), prev_scaling_factor_, max_velocities_, max_accelerations_);
+        auto time_from_start = traj_time_ - current_trajectory_->time_from_start();
+        std::tie(time_from_start, feasible_scaling_factor_, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
+           current_trajectory_->get_trajectory_msg(), time_from_start, period, filtered_scaling_factor_, feasible_scaling_factor_, max_velocities_, max_accelerations_);
         traj_time_ = current_trajectory_->time_from_start() + time_from_start;
-        prev_scaling_factor_ = feasible_scaling;
       }
-      
-      //traj_time_ = traj_time_prev_ + period * scaling_factor_.load();
     }
 
     // Sample expected state from the trajectory
     current_trajectory_->sample(
       traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
     state_desired_.time_from_start = traj_time_ - current_trajectory_->time_from_start();
-    trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,state_desired_);
+    trajectory_utils::apply_scaling_factor(feasible_scaling_factor_, feasible_scaling_derivative,state_desired_);
 
     const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
 
@@ -277,7 +272,7 @@ controller_interface::return_type JointTrajectoryController::update(
       traj_time_ + update_period_, interpolation_method_, command_next_, start_segment_itr,
       end_segment_itr, false);
 
-    trajectory_utils::apply_scaling_factor(feasible_scaling, feasible_scaling_derivative,command_next_);
+    trajectory_utils::apply_scaling_factor(feasible_scaling_factor_, feasible_scaling_derivative,command_next_);
 
     state_current_.time_from_start = time - current_trajectory_->time_from_start();
 
@@ -495,6 +490,10 @@ controller_interface::return_type JointTrajectoryController::update(
       // to be satisfied (will stay in this state until new message arrives)
       // or outside_goal_tolerance violated within the goal_time_tolerance
     }
+  }
+  else
+  {
+    feasible_scaling_factor_ = filtered_scaling_factor_;
   }
 
   publish_state(time, state_desired_, state_current_, state_error_);
@@ -1066,19 +1065,41 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
     std::string(get_node()->get_name()) + "/query_state",
     std::bind(&JointTrajectoryController::query_state_service, this, _1, _2));
 
-  if (
-    !has_velocity_command_interface_ && !has_acceleration_command_interface_ &&
-    !has_effort_command_interface_)
+  if (!params_.speed_scaling.policy.empty())
+  {
+    RCLCPP_INFO(
+      logger, "Using speed scaling policy '%s'.",
+      params_.speed_scaling.policy.c_str());
+      policy_ = params_.speed_scaling.policy;
+  }
+  else 
+  {
+    RCLCPP_INFO(
+      logger,
+      "No speed scaling policy set. Default MULTIPLY policy superimposed.");
+    policy_ = "MULTIPLY";
+  }
+
+  if (!has_effort_command_interface_)
   {
     auto qos = rclcpp::SystemDefaultsQoS();
     qos.transient_local();
-    scaling_factor_sub_ = get_node()->create_subscription<SpeedScalingMsg>(
-      "~/speed_scaling_input", qos,
-      [&](const SpeedScalingMsg & msg) { set_scaling_factor(msg.factor); });
-    RCLCPP_INFO(
-      logger, "Setting initial scaling factor to %2f",
-      params_.speed_scaling.initial_scaling_factor);
-    scaling_factor_ = params_.speed_scaling.initial_scaling_factor;
+    scaling_factor_subs_.clear();
+    for(const auto& topic: params_.speed_scaling.subscribed_topics)
+    {
+      std::size_t idx = scaling_factor_subs_.size();
+      RCLCPP_INFO(logger, "The controller is listening the topic %s (#%ld)", topic.c_str(), idx);
+      scaling_factor_sources_topic_map_.at(idx) = topic;
+      scaling_factor_sources_map_.at(idx).store(params_.speed_scaling.initial_scaling_factor);
+      scaling_factor_subs_.push_back(
+          get_node()->create_subscription<SpeedScalingMsg>(
+            topic, qos,
+            [this,idx](const SpeedScalingMsg & msg) { set_scaling_factor(msg.factor, idx); }));
+      RCLCPP_INFO(
+        logger, "Setting initial scaling factor to %2f",
+        params_.speed_scaling.initial_scaling_factor);
+    }
+    scaling_factor_sources_number_ = scaling_factor_subs_.size();
   }
   else
   {
@@ -1086,13 +1107,16 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
       logger, params_.speed_scaling.initial_scaling_factor != 1.0,
       "Speed scaling is currently only supported for position interfaces. If you want to make use "
       "of speed scaling, please only use a position interface when configuring this controller.");
-    scaling_factor_ = 1.0;
   }
   if (!params_.speed_scaling.state_interface.empty())
   {
     RCLCPP_INFO(
       logger, "Using scaling state from the hardware from interface %s.",
       params_.speed_scaling.state_interface.c_str());
+    scaling_reference_id_ = "scaling_state_interface_op_";
+    scaling_reference_id_ += std::to_string(std::hash<std::string>{}(scaling_reference_id_));
+    scaling_factor_sources_map_.at(scaling_factor_sources_number_).store(params_.speed_scaling.initial_scaling_factor);
+    scaling_factor_sources_number_ +=1;
   }
   else
   {
@@ -1100,7 +1124,7 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
       get_node()->get_logger(),
       "No scaling interface set. This controller will not read speed scaling from the hardware.");
   }
-  scaling_factor_cmd_.store(scaling_factor_.load());
+  force_initial_scaling_factor_ = true;
 
   if (get_update_rate() == 0)
   {
@@ -1141,6 +1165,15 @@ controller_interface::CallbackReturn JointTrajectoryController::on_activate(
     if (it != state_interfaces_.end())
     {
       scaling_state_interface_ = *it;
+      if (scaling_state_interface_.has_value())
+      {
+        auto scaling_state_interface_op = scaling_state_interface_->get().get_optional();
+        if (!scaling_state_interface_op.has_value())
+        {
+          RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
+        }
+        filtered_scaling_factor_ = feasible_scaling_factor_ = scaling_state_interface_op.value();
+      }
     }
     else
     {
@@ -1167,7 +1200,7 @@ controller_interface::CallbackReturn JointTrajectoryController::on_activate(
       return CallbackReturn::ERROR;
     }
   }
-
+  
   // order all joints in the storage
   for (const auto & interface : params_.command_interfaces)
   {
@@ -1382,7 +1415,7 @@ void JointTrajectoryController::publish_state(
     {
       state_publisher_->msg_.output = command_current_;
     }
-    state_publisher_->msg_.speed_scaling_factor = scaling_factor_;
+    state_publisher_->msg_.speed_scaling_factor = feasible_scaling_factor_ ;
 
     state_publisher_->unlockAndPublish();
   }
@@ -1898,7 +1931,7 @@ void JointTrajectoryController::resize_joint_trajectory_point_command(
   }
 }
 
-bool JointTrajectoryController::set_scaling_factor(double scaling_factor)
+bool JointTrajectoryController::set_scaling_factor(double scaling_factor, std::size_t idx)
 {
   if (scaling_factor < 0)
   {
@@ -1908,27 +1941,9 @@ bool JointTrajectoryController::set_scaling_factor(double scaling_factor)
     return false;
   }
 
-  if (scaling_factor != scaling_factor_.load())
-  {
-    RCLCPP_INFO(
-      get_node()->get_logger().get_child("speed_scaling"), "New scaling factor will be %f",
-      scaling_factor);
-  }
-  scaling_factor_.store(scaling_factor);
-  if (
-    params_.speed_scaling.command_interface.empty() &&
-    !params_.speed_scaling.state_interface.empty())
-  {
-    RCLCPP_WARN_ONCE(
-      get_node()->get_logger(),
-      "Setting the scaling factor while only one-way communication with the hardware is setup. "
-      "This will likely get overwritten by the hardware again. If available, please also setup "
-      "the speed_scaling_command_interface_name");
-  }
-  else
-  {
-    scaling_factor_cmd_.store(scaling_factor);
-  }
+  scaling_factor_sources_map_.at(idx).store(scaling_factor);
+  RCLCPP_WARN(this->get_node()->get_logger(), "Topic %s recevied. Scaling value equal to %f", scaling_factor_sources_topic_map_.at(idx).c_str(), scaling_factor);
+  
   return true;
 }
 
@@ -2083,43 +2098,57 @@ void JointTrajectoryController::update_kinematic_limits_from_parameters()
   }
 }
 
-bool JointTrajectoryController::cleanup()
+controller_interface::return_type JointTrajectoryController::update_scaling_factor( )
 {
-  try {
-    // stop timers, cancel goals, release interfaces, reset flags
-    action_server_.reset();
-    state_publisher_.reset();
-    joint_command_subscriber_.reset();
-    current_trajectory_.reset();
-    hold_position_msg_ptr_.reset();
-    // clear interface lists safely
-    for (auto & vec : joint_command_interface_) { vec.clear(); }
-    joint_command_interface_.clear();
-    joint_state_interface_.clear();
-    map_cmd_to_joints_.clear();
-    num_cmd_joints_ = 0;
-    dof_ = 0;
+  auto logger = this->get_node()->get_logger();
 
-    auto _cleanup = [this](trajectory_msgs::msg::JointTrajectoryPoint & point)
-    {
-      point.positions.clear();
-      point.velocities.clear();
-      point.accelerations.clear();
-      point.effort.clear();
-    };
-    _cleanup(state_current_);
-    _cleanup(command_current_);
-    _cleanup(command_next_);
-    _cleanup(state_desired_);
-    _cleanup(state_error_);
-    _cleanup(last_commanded_state_);
-    new_trajectory_msg_.reset();
-    
-
-  } catch(...) {
-    // log but ensure safe state
+  double scaling_factor{1.0};
+  if(force_initial_scaling_factor_)
+  {
+    RCLCPP_INFO(logger, "Imposing the initial scaling %f", params_.speed_scaling.initial_scaling_factor);
+    scaling_factor = params_.speed_scaling.initial_scaling_factor;
+    filtered_scaling_factor_ = params_.speed_scaling.initial_scaling_factor;
+    force_initial_scaling_factor_ = false;
   }
-  return true;
+
+  if (scaling_state_interface_.has_value())
+  {
+    auto scaling_state_interface_op = scaling_state_interface_->get().get_optional();
+    if (!scaling_state_interface_op.has_value())
+    {
+      RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
+      return controller_interface::return_type::ERROR;
+    }
+
+    scaling_factor_sources_map_.at(scaling_factor_sources_number_).store(scaling_state_interface_op.value());
+  }
+
+  if(scaling_factor_sources_map_.size()==0)
+  {
+    scaling_factor = 1.0;
+  }
+  else
+  {
+    double _scaling = 1.0;
+    { 
+      for(std::size_t i=0; i< scaling_factor_sources_number_; i++)
+      {
+        if(policy_  == "MINIMUM")
+          _scaling = std::min(_scaling, scaling_factor_sources_map_.at(i).load());
+        else if(policy_  == "MULTIPLY")
+        _scaling *= scaling_factor_sources_map_.at(i).load();
+        else if(policy_  == "MAXIMUM")
+          _scaling = std::max(_scaling, scaling_factor_sources_map_.at(i).load());
+        else if(policy_  == "AVERAGE")
+          _scaling += scaling_factor_sources_map_.at(i).load() / double(scaling_factor_sources_number_ );
+      }
+    }
+    scaling_factor = _scaling;
+  }
+
+  filtered_scaling_factor_ = filters::exponentialSmoothing(scaling_factor, filtered_scaling_factor_, params_.speed_scaling.filter_coefficient);
+  //std::cout << scaling_factor_sources_map_.front().load() << " - " << filtered_scaling_factor_ << std::endl;
+  return controller_interface::return_type::OK;
 }
 
 

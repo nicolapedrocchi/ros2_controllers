@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <array>
 
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "control_msgs/msg/joint_trajectory_controller_state.hpp"
@@ -57,14 +58,8 @@ class JointTrajectoryController : public controller_interface::ControllerInterfa
 public:
   JointTrajectoryController();
 
-  /**
-   * @brief command_interface_configuration
-   */
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
 
-  /**
-   * @brief command_interface_configuration
-   */
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
   controller_interface::return_type update(
@@ -155,13 +150,6 @@ protected:
   std::vector<bool> joints_angle_wraparound_;
   // reserved storage for result of the command when closed loop pid adapter is used
   std::vector<double> tmp_command_;
-
-  // Things around speed scaling
-  std::atomic<double> scaling_factor_{1.0};
-  std::atomic<double> scaling_factor_cmd_{1.0};
-  double prev_scaling_factor_{1.0};
-  std::map<std::string, double> max_velocities_;
-  std::map<std::string, double> max_accelerations_;
   
   // Timeout to consider commands old
   double cmd_timeout_;
@@ -308,10 +296,23 @@ private:
    * interval
    *
    */
-  bool set_scaling_factor(double scaling_factor);
+  bool set_scaling_factor(double scaling_factor, std::size_t idx);
 
   using SpeedScalingMsg = control_msgs::msg::SpeedScalingFactor;
-  rclcpp::Subscription<SpeedScalingMsg>::SharedPtr scaling_factor_sub_;
+  std::vector<rclcpp::Subscription<SpeedScalingMsg>::SharedPtr> scaling_factor_subs_;
+  std::array<std::atomic<double>, 64> scaling_factor_sources_map_;
+  std::array<std::string, 64> scaling_factor_sources_topic_map_;
+  std::size_t  scaling_factor_sources_number_{0};
+  std::string scaling_reference_id_;
+  // Things around speed scaling
+  std::string policy_{""};
+  double filtered_scaling_factor_{1.0};
+  double feasible_scaling_factor_{1.0};
+  bool force_initial_scaling_factor_{false};
+  std::map<std::string, double> max_velocities_;
+  std::map<std::string, double> max_accelerations_;
+
+  
 
   /**
    * @brief Assigns the values from a trajectory point interface to a joint interface.
@@ -339,7 +340,7 @@ private:
     }
   }
 
-  bool cleanup();
+  controller_interface::return_type update_scaling_factor();
 };
 
 }  // namespace joint_trajectory_controller
