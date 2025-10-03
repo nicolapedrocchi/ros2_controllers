@@ -22,6 +22,10 @@
 #include <vector>
 #include <array>
 
+#include <urdf/model.h>
+#include "joint_limits/joint_limits.hpp"
+
+
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "control_msgs/msg/joint_trajectory_controller_state.hpp"
 #include "control_msgs/msg/speed_scaling_factor.hpp"
@@ -263,8 +267,9 @@ protected:
     const std::shared_ptr<control_msgs::srv::QueryTrajectoryState::Request> request,
     std::shared_ptr<control_msgs::srv::QueryTrajectoryState::Response> response);
 
+  std::map<std::string, double> max_velocities_;
+  std::map<std::string, double> max_accelerations_;
 private:
-  std::vector<hardware_interface::ComponentInfo> get_joints_from_urdf() const;
   void set_kinematic_limits_from_urdf();
   void update_kinematic_limits_from_parameters();
 
@@ -309,8 +314,7 @@ private:
   double filtered_scaling_factor_{1.0};
   double feasible_scaling_factor_{1.0};
   bool force_initial_scaling_factor_{false};
-  std::map<std::string, double> max_velocities_;
-  std::map<std::string, double> max_accelerations_;
+
 
   
 

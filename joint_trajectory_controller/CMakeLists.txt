@@ -90,7 +90,7 @@ if(BUILD_TESTING)
   )
   target_compile_definitions(test_trajectory_controller PRIVATE _USE_MATH_DEFINES)
 
-  # add_definitions(-DTEST_FILES_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/test")
+  add_definitions(-DTEST_FILES_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/test")
   # ament_add_gmock(test_load_joint_trajectory_controller
   #   test/test_load_joint_trajectory_controller.cpp
   # )

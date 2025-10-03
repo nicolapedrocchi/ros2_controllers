@@ -14,7 +14,7 @@
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
 #include "joint_trajectory_controller/trajectory_utils.hpp"
-
+#include "joint_trajectory_controller/trajectory.hpp"
 
 #include <chrono>
 #include <controller_interface/controller_interface_base.hpp>
@@ -22,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <rclcpp/logger.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,8 +31,6 @@
 #include "angles/angles.h"
 #include "controller_interface/helpers.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
-#include "joint_trajectory_controller/trajectory.hpp"
-#include "joint_trajectory_controller/utils.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/qos.hpp"
@@ -2005,71 +2004,22 @@ void JointTrajectoryController::init_hold_position_msg()
   }
 }
 
-
-std::vector<hardware_interface::ComponentInfo> extract_joints_from_hardware_info(
-  const std::vector<hardware_interface::HardwareInfo> & hardware_infos)
-{
-  std::vector<hardware_interface::ComponentInfo> result;
-  for (const auto & hardware_info : hardware_infos)
-  {
-    std::copy(
-      hardware_info.joints.begin(), hardware_info.joints.end(), std::back_insert_iterator(result));
-  }
-  return result;
-}
-
-std::vector<hardware_interface::ComponentInfo> JointTrajectoryController::get_joints_from_urdf() const
-{
-  try
-  {
-    return extract_joints_from_hardware_info(
-      hardware_interface::parse_control_resources_from_urdf(get_robot_description()));
-  }
-  catch (const std::exception & e)
-  {
-    fprintf(stderr, "Exception thrown during extracting gpios info from urdf %s \n", e.what());
-    return {};
-  }
-}
-
 void JointTrajectoryController::set_kinematic_limits_from_urdf()
 {
-  const auto joints{get_joints_from_urdf()};
-  for (const auto & joint_name : params_.joints)
+  urdf::Model model;
+  model.initString(get_robot_description());
+  for (const auto & joint_name : command_joint_names_)
   {
-    for (const auto & joint : joints)
-    {
-      if (joint_name == joint.name)
-      {
-        for(const auto & interface : joint.command_interfaces)
-        {
-          if(interface.name == "position")
-          {
-            //;
-          }
-          else if(interface.name == "velocity")
-          {
-            if(interface.max != "" && std::stod(interface.max) > 0.0)
-            {
-              max_velocities_[joint_name] = std::stod(interface.max);
-            }
-          }
-          else if(interface.name == "acceleration")
-          {
-            if(interface.max != "" && std::stod(interface.max) > 0.0)
-            {
-              max_accelerations_[joint_name] = std::stod(interface.max);
-            }
-          }
-        }
-      }
-    }
+    auto joint = model.getJoint(joint_name);
+    max_velocities_[joint_name] = (joint && joint->limits) ? joint->limits->velocity : std::numeric_limits<double>::infinity();
+    max_accelerations_[joint_name] = std::numeric_limits<double>::infinity();
   }
 }
 
 void JointTrajectoryController::update_kinematic_limits_from_parameters()
 {
-  for (size_t i = 0; i < num_cmd_joints_; ++i)
+
+  for (std::size_t i = 0; i < num_cmd_joints_; ++i)
   {
     const auto & limits = params_.limits.joints_map.at(params_.joints.at(map_cmd_to_joints_[i]));
     if (limits.max_velocity > 0.0)
@@ -2098,7 +2048,7 @@ void JointTrajectoryController::update_kinematic_limits_from_parameters()
   }
 }
 
-controller_interface::return_type JointTrajectoryController::update_scaling_factor( )
+controller_interface::return_type JointTrajectoryController::update_scaling_factor()
 {
   auto logger = this->get_node()->get_logger();
 

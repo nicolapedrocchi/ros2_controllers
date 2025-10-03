@@ -106,13 +106,13 @@ joint_trajectory_controller:
     __map_joints:
       max_velocity: {
         type: double,
-        default_value: 0.0,
-        description: "Max velocity that override the URDF field. Accepted only if less than the URDF value, if present",
+        default_value: .inf,
+        description: "Max velocity which overrides the URDF field. Accepted only if less than the URDF value, if present",
       }
       max_acceleration: {
         type: double,
-        default_value: 0.0,
-        description: "Max acceleration that override the URDF field. Accepted only if less than the URDF value, if present",
+        default_value: .inf,
+        description: "Max acceleration which overrides the URDF field. Accepted only if less than the URDF value, if present",
       }
 
   allow_partial_joints_goal: {

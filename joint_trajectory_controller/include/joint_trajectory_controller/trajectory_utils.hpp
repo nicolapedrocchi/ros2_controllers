@@ -167,6 +167,11 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
     {
       _max_accelerations[trajectory_msg->joint_names[i]] = std::numeric_limits<double>::infinity();
     }
+    if( _max_accelerations[trajectory_msg->joint_names[i]]==std::numeric_limits<double>::infinity()
+    && _max_velocities[trajectory_msg->joint_names[i]] != std::numeric_limits<double>::infinity())
+    {
+      _max_accelerations[trajectory_msg->joint_names[i]] = 2 * _max_velocities[trajectory_msg->joint_names[i]] / period.seconds();
+    }
   }
 
   // ========

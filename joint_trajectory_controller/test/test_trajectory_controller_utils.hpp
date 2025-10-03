@@ -224,6 +224,16 @@ public:
     }
   }
 
+  
+  std::map<std::string, double> get_max_velocities() const 
+  {
+    return max_velocities_;
+  }
+  std::map<std::string, double> get_max_accelerations() const 
+  {
+    return max_accelerations_;
+  }
+
   rclcpp::NodeOptions node_options_;
 };
 
