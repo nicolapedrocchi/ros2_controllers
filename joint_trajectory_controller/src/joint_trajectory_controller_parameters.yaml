@@ -60,7 +60,7 @@ joint_trajectory_controller:
 
     filter_coefficient: {
       type: double,
-      default_value: 0.05,
+      default_value: 0.95,
       description: "Specifies the filter coefficient for the scaling factor exponential filter.",
       validation: {
         gt_eq<>: 0.0,
