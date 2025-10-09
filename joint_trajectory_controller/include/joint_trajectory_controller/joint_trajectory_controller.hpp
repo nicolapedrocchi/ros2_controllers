@@ -22,10 +22,6 @@
 #include <vector>
 #include <array>
 
-#include <urdf/model.h>
-#include "joint_limits/joint_limits.hpp"
-
-
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "control_msgs/msg/joint_trajectory_controller_state.hpp"
 #include "control_msgs/msg/speed_scaling_factor.hpp"
@@ -177,6 +173,7 @@ protected:
   using StatePublisherPtr = std::unique_ptr<StatePublisher>;
   rclcpp::Publisher<ControllerStateMsg>::SharedPtr publisher_;
   StatePublisherPtr state_publisher_;
+  ControllerStateMsg state_msg_;
 
   using FollowJTrajAction = control_msgs::action::FollowJointTrajectory;
   using RealtimeGoalHandle = realtime_tools::RealtimeServerGoalHandle<FollowJTrajAction>;
@@ -272,7 +269,6 @@ protected:
 private:
   void set_kinematic_limits_from_urdf();
   void update_kinematic_limits_from_parameters();
-
 
   void update_pids();
 
