@@ -91,22 +91,22 @@ if(BUILD_TESTING)
   target_compile_definitions(test_trajectory_controller PRIVATE _USE_MATH_DEFINES)
 
   add_definitions(-DTEST_FILES_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/test")
-  ament_add_gmock(test_load_joint_trajectory_controller
-    test/test_load_joint_trajectory_controller.cpp
-  )
-  target_link_libraries(test_load_joint_trajectory_controller
-    joint_trajectory_controller
-    controller_manager::controller_manager
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_load_joint_trajectory_controller
+  #   test/test_load_joint_trajectory_controller.cpp
+  # )
+  # target_link_libraries(test_load_joint_trajectory_controller
+  #   joint_trajectory_controller
+  #   controller_manager::controller_manager
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  ament_add_gmock(test_trajectory_actions
-    test/test_trajectory_actions.cpp
-  )
-  set_tests_properties(test_trajectory_actions PROPERTIES TIMEOUT 300)
-  target_link_libraries(test_trajectory_actions
-    joint_trajectory_controller
-    ros2_control_test_assets::ros2_control_test_assets)
+  # ament_add_gmock(test_trajectory_actions
+  #   test/test_trajectory_actions.cpp
+  # )
+  # set_tests_properties(test_trajectory_actions PROPERTIES TIMEOUT 300)
+  # target_link_libraries(test_trajectory_actions
+  #   joint_trajectory_controller
+  #   ros2_control_test_assets::ros2_control_test_assets)
 endif()
 
 

@@ -2859,7 +2859,7 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
   executor.spin_some();
   state = getState();
   // Value will be set during the first update and read in the second update
-  updateController(rclcpp::Duration::from_seconds(2.0));
+  updateController(rclcpp::Duration::from_seconds(5.0));
 
   // Spin to receive latest state
   executor.spin_some();

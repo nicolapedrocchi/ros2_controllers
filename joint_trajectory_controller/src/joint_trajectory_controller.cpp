@@ -252,7 +252,7 @@ controller_interface::return_type JointTrajectoryController::update(
         traj_time_ = traj_time_ + period;
       }
       else
-      {
+      { 
         auto time_from_start = traj_time_ - current_trajectory_->time_from_start();
         std::tie(time_from_start, feasible_scaling_factor_, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
            current_trajectory_->get_trajectory_msg(), time_from_start, period, filtered_scaling_factor_, feasible_scaling_factor_, max_velocities_, max_accelerations_);

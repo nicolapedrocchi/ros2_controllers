@@ -139,9 +139,9 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
 {
   std::vector<double> zeros(trajectory_msg->joint_names.size(), 0.0);
   double dtau_i = scaling_factor;
-  double dtau_i_1 = prev_scaling_factor;
+  const double& dtau_i_1 = prev_scaling_factor;
   double ddtau_i = (dtau_i-dtau_i_1)/period.seconds();
-  rclcpp::Duration tau_i_1 = sample_time_from_start;
+  const rclcpp::Duration& tau_i_1 = sample_time_from_start;
   rclcpp::Duration tau_i = sample_time_from_start + period * dtau_i;
   TrajectoryPointConstIter k_1_itr, k_itr;
 
@@ -170,7 +170,7 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
     if( _max_accelerations[trajectory_msg->joint_names[i]]==std::numeric_limits<double>::infinity()
     && _max_velocities[trajectory_msg->joint_names[i]] != std::numeric_limits<double>::infinity())
     {
-      _max_accelerations[trajectory_msg->joint_names[i]] = 2 * _max_velocities[trajectory_msg->joint_names[i]] / period.seconds();
+      _max_accelerations[trajectory_msg->joint_names[i]] = 10 * _max_velocities[trajectory_msg->joint_names[i]] / period.seconds();
     }
   }
 
@@ -185,37 +185,35 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
     const std::vector<double> & v_k = k_itr->velocities.empty() ? zeros : k_itr->velocities;
     const std::vector<double> & a_k = k_itr->accelerations.empty() ? zeros : k_itr->accelerations;
 
+    ddtau_i = (dtau_i-dtau_i_1)/period.seconds();
     if(1 == trajectory_utils::leqt(
       _max_velocities, 
       trajectory_msg->joint_names, 
       trajectory_utils::multiply(dtau_i, v_k),
       true))
     {
-      ddtau_i = (dtau_i-dtau_i_1)/period.seconds();
       auto a_k_first_term = trajectory_utils::multiply(dtau_i*dtau_i, a_k);
       auto a_k_second_term = trajectory_utils::multiply(ddtau_i, v_k);
-      if(1 == trajectory_utils::leqt(_max_accelerations, trajectory_msg->joint_names, trajectory_utils::add(a_k_first_term, a_k_second_term),true))
+      auto _a_k = trajectory_utils::add(a_k_first_term, a_k_second_term);
+      if(1 == trajectory_utils::leqt(_max_accelerations, trajectory_msg->joint_names, _a_k,true))
       {
         break;
       }
     }
     // This algorithm is brutal, TODO: implement a more graceful and fast degradation
-    dtau_i = 0.94*dtau_i; // from 1 to 1e-4 in about 150 iterations
-    if(dtau_i<min_allowed_scaling_factor)
+    ddtau_i = 0.9 * ddtau_i;
+    dtau_i = dtau_i_1 + ddtau_i; // from 1 to 1e-4 in about 150 iterations
+    if(ddtau_i<min_allowed_scaling_factor)
     {
-      RCLCPP_WARN(rclcpp::get_logger("joint_trajectory_controller"),
+      RCLCPP_WARN_ONCE(rclcpp::get_logger("joint_trajectory_controller"),
         "Severe scaling factor reduction, trajectory is probably not feasible");
-      tau_i  = tau_i_1;
-      dtau_i = 0.0;
-      dtau_i_1 = 0.0;
+      ddtau_i = 0.0;
+      dtau_i = dtau_i_1;
       break;
-    }
-    else
-    {
-      tau_i  = tau_i_1 + period * dtau_i;
     }
   } while (true);
   
+  tau_i  = tau_i_1 + period * dtau_i;
   return {tau_i, dtau_i, ddtau_i, k_1_itr, k_itr};
 }
 
