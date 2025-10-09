@@ -438,7 +438,15 @@ class JointTrajectoryController(Plugin):
             point.positions.append(cmd)
         duration = rclpy.duration.Duration(seconds=(max(dur) / self._speed_scale))
         point.time_from_start = duration.to_msg()
+        
         traj.points.append(point)
+
+        for i,p in enumerate(traj.points):
+            if i==len(traj.points)-1:
+                break
+            for j,name in enumerate(traj.joint_names):
+                p.velocities.append((traj.points[i+1].positions[j]-traj.points[i].positions[j])/p.time_from_start.seconds())
+                p.accelerations.append((traj.points[i+1].positions[j]-traj.points[i].positions[j])/(p.time_from_start.seconds()*p.time_from_start.seconds()))
 
         self._cmd_pub.publish(traj)
 

@@ -1398,6 +1398,7 @@ void JointTrajectoryController::publish_state(
     state_publisher_->msg_.reference.positions = desired_state.positions;
     state_publisher_->msg_.reference.velocities = desired_state.velocities;
     state_publisher_->msg_.reference.accelerations = desired_state.accelerations;
+    state_publisher_->msg_.reference.time_from_start = desired_state.time_from_start;
     state_publisher_->msg_.feedback.positions = current_state.positions;
     state_publisher_->msg_.error.positions = state_error.positions;
     if (has_velocity_state_interface_)
