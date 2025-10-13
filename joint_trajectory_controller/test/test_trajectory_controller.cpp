@@ -1455,7 +1455,14 @@ TEST_P(TrajectoryControllerTestParameterized, velocity_error)
 TEST_P(TrajectoryControllerTestParameterized, test_jumbled_joint_order)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
-  SetUpAndActivateTrajectoryController(executor);
+    std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("limits.override_urdf", true),
+    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
+  };
+  SetUpAndActivateTrajectoryController(executor, params);
+
   std::vector<double> points_positions = {1.0, 2.0, 3.0};
   std::vector<double> points_effort = {4.0, 5.0, 6.0};
   std::vector<size_t> jumble_map = {1, 2, 0};
@@ -1546,10 +1553,16 @@ TEST_P(TrajectoryControllerTestParameterized, test_jumbled_joint_order)
  */
 TEST_P(TrajectoryControllerTestParameterized, test_partial_joint_list)
 {
-  rclcpp::Parameter partial_joints_parameters("allow_partial_joints_goal", true);
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("allow_partial_joints_goal", true), 
+    rclcpp::Parameter("limits.override_urdf", true),
+    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
+  };
 
   rclcpp::executors::SingleThreadedExecutor executor;
-  SetUpAndActivateTrajectoryController(executor, {partial_joints_parameters});
+  SetUpAndActivateTrajectoryController(executor, params);
 
   const double initial_joint1_cmd = joint_pos_[0];
   const double initial_joint2_cmd = joint_pos_[1];
@@ -1587,7 +1600,8 @@ TEST_P(TrajectoryControllerTestParameterized, test_partial_joint_list)
 
   if (traj_controller_->has_position_command_interface())
   {
-    EXPECT_NEAR(traj_msg.points[0].positions[1], joint_pos_[0], COMMON_THRESHOLD);
+    EXPECT_NEAR(traj_msg.points[0].positions[1], joint_pos_[0], COMMON_THRESHOLD) 
+      << "Velocities are " << traj_msg.points[0].velocities[0] << " and " << traj_msg.points[0].velocities[1];
     EXPECT_NEAR(traj_msg.points[0].positions[0], joint_pos_[1], COMMON_THRESHOLD);
     EXPECT_NEAR(initial_joint3_cmd, joint_pos_[2], COMMON_THRESHOLD)
       << "Joint 3 command should be current position";
@@ -1916,8 +1930,15 @@ TEST_P(TrajectoryControllerTestParameterized, missing_positions_message_accepted
 TEST_P(TrajectoryControllerTestParameterized, test_trajectory_replace)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
-  rclcpp::Parameter partial_joints_parameters("allow_partial_joints_goal", true);
-  SetUpAndActivateTrajectoryController(executor, {partial_joints_parameters});
+   std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("allow_partial_joints_goal", true), 
+    rclcpp::Parameter("limits.override_urdf", true),
+    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
+  };
+
+  SetUpAndActivateTrajectoryController(executor, params);
 
   std::vector<std::vector<double>> points_old{{{2., 3., 4.}}};
   std::vector<std::vector<double>> points_old_velocities{{{0.2, 0.3, 0.4}}};
@@ -2089,9 +2110,16 @@ TEST_P(TrajectoryControllerTestParameterized, test_execute_partial_traj_in_futur
 TEST_P(TrajectoryControllerTestParameterized, test_jump_when_state_tracking_error_updated)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("interpolate_from_desired_state", false), 
+    rclcpp::Parameter("limits.override_urdf", true),
+    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
+  };
+
   // default is false so it will not be actually set parameter
-  rclcpp::Parameter interp_desired_state_parameter("interpolate_from_desired_state", false);
-  SetUpAndActivateTrajectoryController(executor, {interp_desired_state_parameter}, true);
+  SetUpAndActivateTrajectoryController(executor, params, true);
 
   if (traj_controller_->has_position_command_interface() == false)
   {
@@ -2915,9 +2943,9 @@ TEST_F(TrajectoryControllerTest, limits_from_urdf)
   ASSERT_TRUE(max_accelerations.find("joint1")!=max_accelerations.end());
   ASSERT_TRUE(max_accelerations.find("joint2")!=max_accelerations.end());
   ASSERT_TRUE(max_accelerations.find("joint3")!=max_accelerations.end());
-  ASSERT_EQ(max_velocities["joint1"],0.2);
-  ASSERT_EQ(max_velocities["joint2"],0.2);
-  ASSERT_EQ(max_velocities["joint3"],0.2);
+  ASSERT_EQ(max_velocities["joint1"],2);
+  ASSERT_EQ(max_velocities["joint2"],2);
+  ASSERT_EQ(max_velocities["joint3"],2);
   ASSERT_EQ(max_accelerations["joint1"],std::numeric_limits<double>::infinity());
   ASSERT_EQ(max_accelerations["joint2"],std::numeric_limits<double>::infinity());
   ASSERT_EQ(max_accelerations["joint3"],std::numeric_limits<double>::infinity());
@@ -2965,9 +2993,9 @@ TEST_F(TrajectoryControllerTest, limits_from_urdf_lt_param)
 {
   rclcpp::executors::MultiThreadedExecutor executor;
   std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("limits.joint1.max_velocity", 0.3),
-    rclcpp::Parameter("limits.joint2.max_velocity", 0.3),
-    rclcpp::Parameter("limits.joint3.max_velocity", 0.3),
+    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
+    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
     rclcpp::Parameter("limits.joint1.max_acceleration", 1.0),
     rclcpp::Parameter("limits.joint2.max_acceleration", .1),
     rclcpp::Parameter("limits.joint3.max_acceleration", .5),
@@ -2983,9 +3011,9 @@ TEST_F(TrajectoryControllerTest, limits_from_urdf_lt_param)
   ASSERT_TRUE(max_accelerations.find("joint1")!=max_accelerations.end());
   ASSERT_TRUE(max_accelerations.find("joint2")!=max_accelerations.end());
   ASSERT_TRUE(max_accelerations.find("joint3")!=max_accelerations.end());
-  ASSERT_EQ(max_velocities["joint1"],0.2);
-  ASSERT_EQ(max_velocities["joint2"],0.2);
-  ASSERT_EQ(max_velocities["joint3"],0.2);
+  ASSERT_EQ(max_velocities["joint1"],2);
+  ASSERT_EQ(max_velocities["joint2"],2);
+  ASSERT_EQ(max_velocities["joint3"],2);
   ASSERT_EQ(max_accelerations["joint1"],1.0);
   ASSERT_EQ(max_accelerations["joint2"],0.1);
   ASSERT_EQ(max_accelerations["joint3"],0.5);

@@ -17,6 +17,7 @@
 #include "joint_trajectory_controller/trajectory.hpp"
 
 
+#include <rcl/time.h>
 #include <urdf/model.h>
 #include "joint_limits/joint_limits.hpp"
 
@@ -209,6 +210,8 @@ controller_interface::return_type JointTrajectoryController::update(
     fill_partial_goal(*new_external_msg);
     sort_to_local_joint_order(*new_external_msg);
     // TODO(denis): Add here integration of position and velocity
+    std::cout << "^^^^^^^^^^^^^^^^^^^^^" << ": adding new trajectory message with "
+              << std::endl;
     current_trajectory_->update(*new_external_msg);
   }
 
@@ -218,6 +221,9 @@ controller_interface::return_type JointTrajectoryController::update(
   read_state_from_state_interfaces(state_current_);
 
   // currently carrying out a trajectory
+  RCLCPP_INFO_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 1000,
+    "updating controller, has active trajectory: %s", has_active_trajectory() ? "true" : "false");
   if (has_active_trajectory())
   {
     double feasible_scaling_derivative = 1.0;
@@ -225,9 +231,15 @@ controller_interface::return_type JointTrajectoryController::update(
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // if sampling the first time, set the point before you sample
     
+    RCLCPP_INFO_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 1000,
+    "updating controller, is sampled?: %s", current_trajectory_->is_sampled_already()? "true" : "false");
     if (!current_trajectory_->is_sampled_already())
     {
       first_sample = true;
+      RCLCPP_INFO_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "intrpolate?: %s", params_.interpolate_from_desired_state ? "true" : "false");
       if (params_.interpolate_from_desired_state)
       {
         if (std::abs(last_commanded_time_.seconds()) < std::numeric_limits<float>::epsilon())
@@ -247,6 +259,9 @@ controller_interface::return_type JointTrajectoryController::update(
     }
     else // the trajectory has been sampled, i.e., the sample function has been called!
     {
+      RCLCPP_INFO_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "before start time: %s", traj_time_ < current_trajectory_->time_from_start()? "true" : "false");
       if (traj_time_ < current_trajectory_->time_from_start())
       {
         traj_time_ = traj_time_ + period;
@@ -257,9 +272,15 @@ controller_interface::return_type JointTrajectoryController::update(
         std::tie(time_from_start, feasible_scaling_factor_, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
            current_trajectory_->get_trajectory_msg(), time_from_start, period, filtered_scaling_factor_, feasible_scaling_factor_, max_velocities_, max_accelerations_);
         traj_time_ = current_trajectory_->time_from_start() + time_from_start;
+        RCLCPP_WARN_THROTTLE(get_node()->get_logger(), 
+        *get_node()->get_clock(), 1000,
+        " The optimized scLING FACTOR IS .+%f", feasible_scaling_factor_);
       }
     }
 
+    RCLCPP_INFO_THROTTLE(
+      get_node()->get_logger(), *get_node()->get_clock(), 1000,
+      "sample");
     // Sample expected state from the trajectory
     current_trajectory_->sample(
       traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
@@ -1948,7 +1969,7 @@ bool JointTrajectoryController::set_scaling_factor(double scaling_factor, std::s
 
 bool JointTrajectoryController::has_active_trajectory() const
 {
-  return current_trajectory_ != nullptr && current_trajectory_->has_trajectory_msg();
+  return (current_trajectory_ != nullptr) && current_trajectory_->has_trajectory_msg();
 }
 
 void JointTrajectoryController::update_pids()
@@ -2008,7 +2029,7 @@ void JointTrajectoryController::set_kinematic_limits_from_urdf()
 {
   urdf::Model model;
   model.initString(get_robot_description());
-  for (const auto & joint_name : command_joint_names_)
+  for (const auto & joint_name : params_.joints)
   {
     auto joint = model.getJoint(joint_name);
     max_velocities_[joint_name] = (joint && joint->limits) ? joint->limits->velocity : std::numeric_limits<double>::infinity();
@@ -2019,31 +2040,31 @@ void JointTrajectoryController::set_kinematic_limits_from_urdf()
 void JointTrajectoryController::update_kinematic_limits_from_parameters()
 {
 
-  for (std::size_t i = 0; i < num_cmd_joints_; ++i)
+  for (const auto & joint_name: params_.joints)
   {
-    const auto & limits = params_.limits.joints_map.at(params_.joints.at(map_cmd_to_joints_[i]));
+    const auto & limits = params_.limits.joints_map.at(joint_name);
     if (limits.max_velocity > 0.0)
     {
-      if( max_velocities_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_velocities_.end())
+      if( max_velocities_.find(joint_name) == max_velocities_.end() || params_.limits.override_urdf)
       {
-        max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_velocity;
+        max_velocities_[joint_name] = limits.max_velocity;
       }
       else
       {
-        max_velocities_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_velocity, max_velocities_[params_.joints.at(map_cmd_to_joints_[i])]);
+        max_velocities_[joint_name] = std::min(limits.max_velocity, max_velocities_[joint_name]);
       }
     }
     if (limits.max_acceleration > 0.0)
     {
-      if( max_accelerations_.find(params_.joints.at(map_cmd_to_joints_[i])) == max_accelerations_.end())
+      if( max_accelerations_.find(joint_name) == max_accelerations_.end() || params_.limits.override_urdf)
       {
-        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = limits.max_acceleration;
+        max_accelerations_[joint_name] = limits.max_acceleration;
       }
       else
       {
-        max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+        max_accelerations_[joint_name] = std::min(limits.max_acceleration, max_accelerations_[joint_name]);
       }
-      max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])] = std::min(limits.max_acceleration, max_accelerations_[params_.joints.at(map_cmd_to_joints_[i])]);
+      max_accelerations_[joint_name] = std::min(limits.max_acceleration, max_accelerations_[joint_name]);
     }
   }
 }

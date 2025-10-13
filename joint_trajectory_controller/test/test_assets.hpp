@@ -54,7 +54,7 @@ const auto urdf_rrrbot_revolute =
     <origin rpy="-1.57079632679 0 0" xyz="0 0 0.2"/>
     <parent link="base_link"/>
     <child link="link1"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link1">
     <inertial>
@@ -82,7 +82,7 @@ const auto urdf_rrrbot_revolute =
     <origin rpy="1.57079632679 0 0" xyz="0 0 0.9"/>
     <parent link="link1"/>
     <child link="link2"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link2">
     <inertial>
@@ -110,7 +110,7 @@ const auto urdf_rrrbot_revolute =
     <origin rpy="1.57079632679 0 0" xyz="0 0 0.9"/>
     <parent link="link2"/>
     <child link="link3"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link3">
     <inertial>
@@ -181,7 +181,7 @@ const auto urdf_rrrbot_continuous =
     <origin rpy="-1.57079632679 0 0" xyz="0 0 0.2"/>
     <parent link="base_link"/>
     <child link="link1"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link1">
     <inertial>
@@ -209,7 +209,7 @@ const auto urdf_rrrbot_continuous =
     <origin rpy="1.57079632679 0 0" xyz="0 0 0.9"/>
     <parent link="link1"/>
     <child link="link2"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link2">
     <inertial>
@@ -237,7 +237,7 @@ const auto urdf_rrrbot_continuous =
     <origin rpy="1.57079632679 0 0" xyz="0 0 0.9"/>
     <parent link="link2"/>
     <child link="link3"/>
-    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="0.2"/>
+    <limit effort="0.1" lower="-3.14159265359" upper="3.14159265359" velocity="2.0"/>
   </joint>
   <link name="link3">
     <inertial>

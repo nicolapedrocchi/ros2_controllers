@@ -103,6 +103,11 @@ joint_trajectory_controller:
   }
 
   limits:
+    override_urdf: {
+      type: bool, 
+      default_value: false,
+      description: "If flagged, velocity limits that are greater than the URDF values are considered",
+    }
     __map_joints:
       max_velocity: {
         type: double,

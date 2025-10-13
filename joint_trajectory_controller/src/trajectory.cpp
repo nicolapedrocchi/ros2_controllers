@@ -39,6 +39,10 @@ Trajectory::Trajectory(
   trajectory_start_time_(static_cast<rclcpp::Time>(joint_trajectory->header.stamp))
 {
   set_point_before_trajectory_msg(current_time, current_point);
+      std::cout << "^^^^^^^^^^^^^^^^^^^^^" << ": UPDATE trajectory message with "
+                << trajectory_msg_->points.size()
+              << std::endl;
+
   update(joint_trajectory);
 }
 
