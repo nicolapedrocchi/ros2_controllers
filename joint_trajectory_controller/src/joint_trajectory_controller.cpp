@@ -177,9 +177,9 @@ controller_interface::return_type JointTrajectoryController::update(
 
   if (scaling_command_interface_.has_value())
   {
-    if (!scaling_command_interface_->get().set_value(filtered_scaling_factor_))
+    if (!scaling_command_interface_->get().set_value(feasible_scaling_factor_))
     {
-      RCLCPP_ERROR(logger, "Could not set speed scaling factor through command interfaces.");
+      RCLCPP_ERROR(logger, "Could not  set speed scaling factor through command interfaces.");
     }
   }
 
@@ -210,8 +210,6 @@ controller_interface::return_type JointTrajectoryController::update(
     fill_partial_goal(*new_external_msg);
     sort_to_local_joint_order(*new_external_msg);
     // TODO(denis): Add here integration of position and velocity
-    std::cout << "^^^^^^^^^^^^^^^^^^^^^" << ": adding new trajectory message with "
-              << std::endl;
     current_trajectory_->update(*new_external_msg);
   }
 
@@ -221,25 +219,15 @@ controller_interface::return_type JointTrajectoryController::update(
   read_state_from_state_interfaces(state_current_);
 
   // currently carrying out a trajectory
-  RCLCPP_INFO_THROTTLE(
-    get_node()->get_logger(), *get_node()->get_clock(), 1000,
-    "updating controller, has active trajectory: %s", has_active_trajectory() ? "true" : "false");
   if (has_active_trajectory())
   {
     double feasible_scaling_derivative = 1.0;
     bool first_sample = false;
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // if sampling the first time, set the point before you sample
-    
-    RCLCPP_INFO_THROTTLE(
-    get_node()->get_logger(), *get_node()->get_clock(), 1000,
-    "updating controller, is sampled?: %s", current_trajectory_->is_sampled_already()? "true" : "false");
     if (!current_trajectory_->is_sampled_already())
     {
       first_sample = true;
-      RCLCPP_INFO_THROTTLE(
-      get_node()->get_logger(), *get_node()->get_clock(), 1000,
-      "intrpolate?: %s", params_.interpolate_from_desired_state ? "true" : "false");
       if (params_.interpolate_from_desired_state)
       {
         if (std::abs(last_commanded_time_.seconds()) < std::numeric_limits<float>::epsilon())
@@ -259,9 +247,6 @@ controller_interface::return_type JointTrajectoryController::update(
     }
     else // the trajectory has been sampled, i.e., the sample function has been called!
     {
-      RCLCPP_INFO_THROTTLE(
-      get_node()->get_logger(), *get_node()->get_clock(), 1000,
-      "before start time: %s", traj_time_ < current_trajectory_->time_from_start()? "true" : "false");
       if (traj_time_ < current_trajectory_->time_from_start())
       {
         traj_time_ = traj_time_ + period;
@@ -272,15 +257,11 @@ controller_interface::return_type JointTrajectoryController::update(
         std::tie(time_from_start, feasible_scaling_factor_, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
            current_trajectory_->get_trajectory_msg(), time_from_start, period, filtered_scaling_factor_, feasible_scaling_factor_, max_velocities_, max_accelerations_);
         traj_time_ = current_trajectory_->time_from_start() + time_from_start;
-        RCLCPP_WARN_THROTTLE(get_node()->get_logger(), 
-        *get_node()->get_clock(), 1000,
-        " The optimized scLING FACTOR IS .+%f", feasible_scaling_factor_);
       }
     }
+    RCLCPP_WARN(this->get_node()->get_logger(), "Time from start %f feasible scaling %f (and derivative: %f)", traj_time_.seconds(), feasible_scaling_factor_, feasible_scaling_derivative);
 
-    RCLCPP_INFO_THROTTLE(
-      get_node()->get_logger(), *get_node()->get_clock(), 1000,
-      "sample");
+
     // Sample expected state from the trajectory
     current_trajectory_->sample(
       traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
@@ -291,7 +272,7 @@ controller_interface::return_type JointTrajectoryController::update(
 
     // Sample setpoint for next control cycle
     const bool valid_point = current_trajectory_->sample(
-      traj_time_ + update_period_, interpolation_method_, command_next_, start_segment_itr,
+      traj_time_ + update_period_ * feasible_scaling_factor_, interpolation_method_, command_next_, start_segment_itr,
       end_segment_itr, false);
 
     trajectory_utils::apply_scaling_factor(feasible_scaling_factor_, feasible_scaling_derivative,command_next_);
@@ -1962,7 +1943,6 @@ bool JointTrajectoryController::set_scaling_factor(double scaling_factor, std::s
   }
 
   scaling_factor_sources_map_.at(idx).store(scaling_factor);
-  RCLCPP_WARN(this->get_node()->get_logger(), "Topic %s recevied. Scaling value equal to %f", scaling_factor_sources_topic_map_.at(idx).c_str(), scaling_factor);
   
   return true;
 }
@@ -2118,7 +2098,6 @@ controller_interface::return_type JointTrajectoryController::update_scaling_fact
   }
 
   filtered_scaling_factor_ = filters::exponentialSmoothing(scaling_factor, filtered_scaling_factor_, params_.speed_scaling.filter_coefficient);
-  //std::cout << scaling_factor_sources_map_.front().load() << " - " << filtered_scaling_factor_ << std::endl;
   return controller_interface::return_type::OK;
 }
 

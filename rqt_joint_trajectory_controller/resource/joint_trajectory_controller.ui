@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>336</width>
-    <height>317</height>
+    <height>368</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -100,6 +100,37 @@
          </widget>
         </item>
         <item>
+         <spacer name="horizontalSpacer_3">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="send_goal">
+          <property name="text">
+           <string/>
+          </property>
+          <property name="icon">
+           <iconset>
+            <normaloff>file-send-svgrepo-com.svg</normaloff>
+            <normalon>cancel-svgrepo-com.svg</normalon>file-send-svgrepo-com.svg</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>48</width>
+            <height>48</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="horizontalSpacer_2">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
@@ -172,8 +203,8 @@
           <rect>
            <x>0</x>
            <y>0</y>
-           <width>314</width>
-           <height>109</height>
+           <width>294</width>
+           <height>111</height>
           </rect>
          </property>
         </widget>
@@ -195,7 +226,6 @@
  <tabstops>
   <tabstop>cm_combo</tabstop>
   <tabstop>jtc_combo</tabstop>
-  <tabstop>enable_button</tabstop>
  </tabstops>
  <resources/>
  <connections/>

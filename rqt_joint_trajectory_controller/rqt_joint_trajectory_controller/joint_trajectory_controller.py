@@ -148,9 +148,9 @@ class JointTrajectoryController(Plugin):
         self._robot_joint_limits = {}  # Lazily evaluated on first use
 
         # Timer for sending commands to active controller
-        self._update_cmd_timer = QTimer(self)
-        self._update_cmd_timer.setInterval(int(1000.0 / self._cmd_pub_freq))
-        self._update_cmd_timer.timeout.connect(self._update_cmd_cb)
+        # self._update_cmd_timer = QTimer(self)
+        # self._update_cmd_timer.setInterval(int(1000.0 / self._cmd_pub_freq))
+        # self._update_cmd_timer.timeout.connect(self._update_cmd_cb)
 
         # Timer for updating the joint widgets from the controller state
         self._update_act_pos_timer = QTimer(self)
@@ -178,14 +178,17 @@ class JointTrajectoryController(Plugin):
         w.enable_button.toggled.connect(self._on_jtc_enabled)
         w.jtc_combo.currentIndexChanged[str].connect(self._on_jtc_change)
         w.cm_combo.currentIndexChanged[str].connect(self._on_cm_change)
-
+        print('>>> Connecting the goal button')
+        w.send_goal.setCheckable(True)
+        w.send_goal.toggled.connect(self._on_jtc_send_goal)
+        print('<<< Goal button COnnected')
         self._cmd_pub = None  # Controller command publisher
         self._state_sub = None  # Controller state subscriber
 
         self._list_controllers = None
 
     def shutdown_plugin(self):
-        self._update_cmd_timer.stop()
+        #self._update_cmd_timer.stop()
         self._update_act_pos_timer.stop()
         self._update_cm_list_timer.stop()
         self._update_jtc_list_timer.stop()
@@ -282,6 +285,18 @@ class JointTrajectoryController(Plugin):
         if self._jtc_name:
             self._load_jtc()
 
+    def _on_jtc_send_goal(self, val):
+        print(">>>> Goal button toggled:", val)
+        # Don't allow sending if there are no controllers selected
+        if not self._jtc_name:
+            self._widget.send_goal.setChecked(False)
+            return
+
+        if val:
+            self._update_cmd_cb()
+        else:
+            print("Goal ABOTRTED ----- TO DO") 
+
     def _on_jtc_enabled(self, val):
         # Don't allow enabling if there are no controllers selected
         if not self._jtc_name:
@@ -298,10 +313,10 @@ class JointTrajectoryController(Plugin):
         if val:
             # Widgets send reference position commands to controller
             self._update_act_pos_timer.stop()
-            self._update_cmd_timer.start()
+            #self._update_cmd_timer.start()
         else:
             # Controller updates widgets with feedback position
-            self._update_cmd_timer.stop()
+            #self._update_cmd_timer.stop()
             self._update_act_pos_timer.start()
 
     def _load_jtc(self):
