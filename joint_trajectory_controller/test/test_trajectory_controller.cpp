@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+
 #include <cstddef>
 
 #include <chrono>
@@ -40,7 +44,6 @@ using lifecycle_msgs::msg::State;
 using test_trajectory_controllers::TrajectoryControllerTest;
 using test_trajectory_controllers::TrajectoryControllerTestParameterized;
 
-#if 1
 // Floating-point value comparison threshold
 const double EPS = 1e-6;
 
@@ -461,6 +464,33 @@ TEST_P(TrajectoryControllerTestParameterized, state_topic_consistency_command_jo
   }
 }
 
+TEST_F(TrajectoryControllerTest, time_from_start_populated)
+{
+  rclcpp::executors::SingleThreadedExecutor executor;
+  SetUpAndActivateTrajectoryController(executor, {});
+  subscribeToState(executor);
+
+  // schedule a single waypoint at 100ms:
+  builtin_interfaces::msg::Duration tfs;
+  tfs.sec = 0;
+  tfs.nanosec = 100000000u;
+  publish(tfs, {INITIAL_POS_JOINTS}, rclcpp::Time(0));
+  traj_controller_->wait_for_trajectory(executor);
+
+  // update for 0.2s
+  updateController(rclcpp::Duration::from_seconds(0.2));
+  // give the publish timer one more spin
+  executor.spin_some();
+
+  auto state = getState();
+  ASSERT_TRUE(state);
+  // should be around 0.2s
+  EXPECT_EQ(state->feedback.time_from_start.sec, 0u);
+  EXPECT_NEAR(state->feedback.time_from_start.nanosec, 200000000u, 10000000u);
+  EXPECT_EQ(state->reference.time_from_start.sec, 0u);
+  EXPECT_NEAR(state->reference.time_from_start.nanosec, 200000000u, 10000000u);
+}
+
 /**
  * @brief check if dynamic parameters are updated
  */
@@ -584,8 +614,6 @@ TEST_P(TrajectoryControllerTestParameterized, compute_error_angle_wraparound_tru
   size_t n_joints = joint_names_.size();
 
   // send msg
-  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
-  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
   // *INDENT-OFF*
   std::vector<std::vector<double>> points{
     {{3.3, 4.4, 6.6}}, {{7.7, 8.8, 9.9}}, {{10.10, 11.11, 12.12}}};
@@ -676,8 +704,6 @@ TEST_P(TrajectoryControllerTestParameterized, compute_error_angle_wraparound_fal
   size_t n_joints = joint_names_.size();
 
   // send msg
-  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
-  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
   // *INDENT-OFF*
   std::vector<std::vector<double>> points{
     {{3.3, 4.4, 6.6}}, {{7.7, 8.8, 9.9}}, {{10.10, 11.11, 12.12}}};
@@ -2566,7 +2592,6 @@ INSTANTIATE_TEST_SUITE_P(
       std::vector<std::string>({"position", "effort"}),
       std::vector<std::string>({"position", "velocity", "acceleration"}))));
 
-#endif
 /**
  * @brief see if parameter validation is correct
  *
@@ -2654,8 +2679,10 @@ TEST_F(TrajectoryControllerTest, setting_scaling_factor_works_correctly)
   rclcpp::executors::MultiThreadedExecutor executor;
   std::vector<rclcpp::Parameter> params = {};
   SetUpAndActivateTrajectoryController(executor, params);
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
 
   control_msgs::msg::SpeedScalingFactor msg;
@@ -2754,8 +2781,10 @@ TEST_F(TrajectoryControllerTest, scaling_state_interface_sets_value)
   };
   SetUpAndActivateTrajectoryController(executor, params);
 
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
   updateController(rclcpp::Duration::from_seconds(10.0));
   // Spin to receive latest state
@@ -2789,8 +2818,10 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
   };
   SetUpAndActivateTrajectoryController(executor, params);
 
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
   updateController(rclcpp::Duration::from_seconds(10.0));
   // Spin to receive latest state
