@@ -153,8 +153,6 @@ protected:
   // Things around speed scaling
   std::atomic<double> scaling_factor_{1.0};
   std::atomic<double> scaling_factor_cmd_{1.0};
-  std::map<std::string, double> max_velocities_;
-  std::map<std::string, double> max_accelerations_;
 
   // Timeout to consider commands old
   double cmd_timeout_;
@@ -270,11 +268,6 @@ protected:
     std::shared_ptr<control_msgs::srv::QueryTrajectoryState::Response> response);
 
 private:
-  std::vector<hardware_interface::ComponentInfo> get_joints_from_urdf() const;
-  void set_kinematic_limits_from_urdf();
-  void update_kinematic_limits_from_parameters();
-
-
   void update_pids();
 
   bool contains_interface_type(
