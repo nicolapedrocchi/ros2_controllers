@@ -16,21 +16,19 @@
 #include "joint_trajectory_controller/trajectory_utils.hpp"
 #include "joint_trajectory_controller/trajectory.hpp"
 
-
+#include <limits>
 #include <rcl/time.h>
 #include <urdf/model.h>
 #include "joint_limits/joint_limits.hpp"
-
+#include <control_toolbox/filters.hpp>
 
 #include <chrono>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <functional>
 
 #include "angles/angles.h"
 #include "controller_interface/helpers.hpp"
@@ -49,8 +47,6 @@
 #else
 #include "urdf/model.h"
 #endif
-
-#include <control_toolbox/filters.hpp>
 
 namespace joint_trajectory_controller
 {
@@ -259,9 +255,6 @@ controller_interface::return_type JointTrajectoryController::update(
         traj_time_ = current_trajectory_->time_from_start() + time_from_start;
       }
     }
-    RCLCPP_WARN(this->get_node()->get_logger(), "Time from start %f feasible scaling %f (and derivative: %f)", traj_time_.seconds(), feasible_scaling_factor_, feasible_scaling_derivative);
-
-
     // Sample expected state from the trajectory
     current_trajectory_->sample(
       traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
@@ -765,7 +758,7 @@ void JointTrajectoryController::query_state_service(
 {
   const auto logger = get_node()->get_logger();
   // Preconditions
-  if (get_lifecycle_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE)
+  if (get_lifecycle_id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE)
   {
     RCLCPP_ERROR(logger, "Can't sample trajectory. Controller is not active.");
     response->success = false;
@@ -856,7 +849,7 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
     for (size_t i = 0; i < command_joint_names_.size(); i++)
     {
       RCLCPP_DEBUG(
-        logger, "Command joint %lu: '%s' maps to joint %lu: '%s'.", i,
+        logger, "Command joint %zu: '%s' maps to joint %zu: '%s'.", i,
         command_joint_names_[i].c_str(), map_cmd_to_joints_[i],
         params_.joints.at(map_cmd_to_joints_[i]).c_str());
     }
@@ -983,9 +976,7 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
   const std::string interpolation_string =
     get_node()->get_parameter("interpolation_method").as_string();
   interpolation_method_ = interpolation_methods::from_string(interpolation_string);
-  RCLCPP_INFO(
-    logger, "Using '%s' interpolation method.",
-    interpolation_methods::InterpolationMethodMap.at(interpolation_method_).c_str());
+  RCLCPP_INFO(logger, "Using '%s' interpolation method.", interpolation_string.c_str());
 
   // prepare hold_position_msg
   init_hold_position_msg();
@@ -1099,7 +1090,6 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
         logger, "Setting initial scaling factor to %2f",
         params_.speed_scaling.initial_scaling_factor);
     }
-    scaling_factor_sources_number_ = scaling_factor_subs_.size();
   }
   else
   {
@@ -1115,8 +1105,8 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
       params_.speed_scaling.state_interface.c_str());
     scaling_reference_id_ = "scaling_state_interface_op_";
     scaling_reference_id_ += std::to_string(std::hash<std::string>{}(scaling_reference_id_));
-    scaling_factor_sources_map_.at(scaling_factor_sources_number_).store(params_.speed_scaling.initial_scaling_factor);
-    scaling_factor_sources_number_ +=1;
+    const std::size_t& number_of_scaling_factor_sources = scaling_factor_subs_.size();
+    scaling_factor_sources_map_.at(number_of_scaling_factor_sources).store(params_.speed_scaling.initial_scaling_factor);
   }
   else
   {
@@ -1396,10 +1386,11 @@ void JointTrajectoryController::publish_state(
   if (state_publisher_)
   {
     state_msg_.header.stamp = time;
+    state_msg_.reference.time_from_start = desired_state.time_from_start;
     state_msg_.reference.positions = desired_state.positions;
     state_msg_.reference.velocities = desired_state.velocities;
     state_msg_.reference.accelerations = desired_state.accelerations;
-    state_msg_.reference.time_from_start = desired_state.time_from_start;
+    state_msg_.feedback.time_from_start = current_state.time_from_start;
     state_msg_.feedback.positions = current_state.positions;
     state_msg_.error.positions = state_error.positions;
     if (has_velocity_state_interface_)
@@ -1444,7 +1435,7 @@ rclcpp_action::GoalResponse JointTrajectoryController::goal_received_callback(
   RCLCPP_INFO(get_node()->get_logger(), "Received new action goal");
 
   // Precondition: Running controller
-  if (get_lifecycle_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
+  if (get_lifecycle_id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
   {
     RCLCPP_ERROR(
       get_node()->get_logger(), "Can't accept new action goals. Controller is not running.");
@@ -2070,8 +2061,8 @@ controller_interface::return_type JointTrajectoryController::update_scaling_fact
       RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
       return controller_interface::return_type::ERROR;
     }
-
-    scaling_factor_sources_map_.at(scaling_factor_sources_number_).store(scaling_state_interface_op.value());
+    const std::size_t& idx_scaling_state_interface = scaling_factor_subs_.size();
+    scaling_factor_sources_map_.at(idx_scaling_state_interface).store(scaling_state_interface_op.value());
   }
 
   if(scaling_factor_sources_map_.size()==0)
@@ -2080,9 +2071,9 @@ controller_interface::return_type JointTrajectoryController::update_scaling_fact
   }
   else
   {
-    double _scaling = 1.0;
+    double _scaling = (policy_  == "AVERAGE") ? 0.0 : 1.0;
     { 
-      for(std::size_t i=0; i< scaling_factor_sources_number_; i++)
+      for(std::size_t i=0; i< scaling_factor_subs_.size(); i++)
       {
         if(policy_  == "MINIMUM")
           _scaling = std::min(_scaling, scaling_factor_sources_map_.at(i).load());
@@ -2091,7 +2082,7 @@ controller_interface::return_type JointTrajectoryController::update_scaling_fact
         else if(policy_  == "MAXIMUM")
           _scaling = std::max(_scaling, scaling_factor_sources_map_.at(i).load());
         else if(policy_  == "AVERAGE")
-          _scaling += scaling_factor_sources_map_.at(i).load() / double(scaling_factor_sources_number_ );
+          _scaling += scaling_factor_sources_map_.at(i).load() / double(scaling_factor_subs_.size());
       }
     }
     scaling_factor = _scaling;

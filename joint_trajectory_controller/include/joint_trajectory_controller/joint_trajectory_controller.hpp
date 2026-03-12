@@ -180,8 +180,8 @@ protected:
   using RealtimeGoalHandlePtr = std::shared_ptr<RealtimeGoalHandle>;
   using RealtimeGoalHandleBuffer = realtime_tools::RealtimeBuffer<RealtimeGoalHandlePtr>;
 
+  RealtimeGoalHandleBuffer rt_active_goal_;  ///< Currently active action goal, if any.
   rclcpp_action::Server<FollowJTrajAction>::SharedPtr action_server_;
-  RealtimeGoalHandleBuffer rt_active_goal_;       ///< Currently active action goal, if any.
   std::atomic<bool> rt_has_pending_goal_{false};  ///< Is there a pending action goal?
   rclcpp::TimerBase::SharedPtr goal_handle_timer_;
   rclcpp::Duration action_monitor_period_ = rclcpp::Duration(50ms);
@@ -303,16 +303,13 @@ private:
   std::vector<rclcpp::Subscription<SpeedScalingMsg>::SharedPtr> scaling_factor_subs_;
   std::array<std::atomic<double>, 64> scaling_factor_sources_map_;
   std::array<std::string, 64> scaling_factor_sources_topic_map_;
-  std::size_t  scaling_factor_sources_number_{0};
+  //std::size_t  scaling_factor_sources_number_{0};
   std::string scaling_reference_id_;
   // Things around speed scaling
   std::string policy_{""};
   double filtered_scaling_factor_{1.0};
   double feasible_scaling_factor_{1.0};
   bool force_initial_scaling_factor_{false};
-
-
-  
 
   /**
    * @brief Assigns the values from a trajectory point interface to a joint interface.

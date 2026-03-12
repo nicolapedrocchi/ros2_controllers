@@ -14,6 +14,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   hardware_interface
   pluginlib
   rclcpp
+  rclcpp_action
   rclcpp_lifecycle
   realtime_tools
   rsl
@@ -36,6 +37,7 @@ generate_parameter_library(joint_trajectory_controller_parameters
 add_library(joint_trajectory_controller SHARED
   src/joint_trajectory_controller.cpp
   src/trajectory.cpp
+  src/validate_jtc_parameters.cpp
 )
 target_compile_features(joint_trajectory_controller PUBLIC cxx_std_17)
 if(WIN32)
@@ -52,6 +54,7 @@ target_link_libraries(joint_trajectory_controller PUBLIC
                       hardware_interface::hardware_interface
                       pluginlib::pluginlib
                       rclcpp::rclcpp
+                      rclcpp_action::rclcpp_action
                       rclcpp_lifecycle::rclcpp_lifecycle
                       realtime_tools::realtime_tools
                       rsl::rsl

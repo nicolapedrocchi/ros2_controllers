@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+
 #include <cstddef>
 
 #include <chrono>
@@ -458,6 +462,33 @@ TEST_P(TrajectoryControllerTestParameterized, state_topic_consistency_command_jo
   {
     EXPECT_EQ(n_joints, state->output.effort.size());
   }
+}
+
+TEST_F(TrajectoryControllerTest, time_from_start_populated)
+{
+  rclcpp::executors::SingleThreadedExecutor executor;
+  SetUpAndActivateTrajectoryController(executor, {});
+  subscribeToState(executor);
+
+  // schedule a single waypoint at 100ms:
+  builtin_interfaces::msg::Duration tfs;
+  tfs.sec = 0;
+  tfs.nanosec = 100000000u;
+  publish(tfs, {INITIAL_POS_JOINTS}, rclcpp::Time(0));
+  traj_controller_->wait_for_trajectory(executor);
+
+  // update for 0.2s
+  updateController(rclcpp::Duration::from_seconds(0.2));
+  // give the publish timer one more spin
+  executor.spin_some();
+
+  auto state = getState();
+  ASSERT_TRUE(state);
+  // should be around 0.2s
+  EXPECT_EQ(state->feedback.time_from_start.sec, 0u);
+  EXPECT_NEAR(state->feedback.time_from_start.nanosec, 200000000u, 10000000u);
+  EXPECT_EQ(state->reference.time_from_start.sec, 0u);
+  EXPECT_NEAR(state->reference.time_from_start.nanosec, 200000000u, 10000000u);
 }
 
 /**
@@ -2674,12 +2705,12 @@ TEST_F(TrajectoryControllerTest, incorrect_initialization_using_interface_parame
 TEST_F(TrajectoryControllerTest, setting_scaling_factor_works_correctly)
 {
   rclcpp::executors::MultiThreadedExecutor executor;
-  std::vector<rclcpp::Parameter> params = {
-
-  };
+  std::vector<rclcpp::Parameter> params = {};
   SetUpAndActivateTrajectoryController(executor, params);
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS().transient_local());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
 
   updateController(rclcpp::Duration::from_seconds(0.01));
@@ -2784,8 +2815,10 @@ TEST_F(TrajectoryControllerTest, scaling_state_interface_sets_value)
   };
   SetUpAndActivateTrajectoryController(executor, params);
 
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS().transient_local());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
   updateController(rclcpp::Duration::from_seconds(0.01));  // an exponential moving average is used
   // Spin to receive latest state
@@ -2869,8 +2902,10 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
   };
   SetUpAndActivateTrajectoryController(executor, params);
 
+  // Create a QoS profile that matches the controller's speed_scaling subscriber
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS().transient_local());
+    controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
   updateController(rclcpp::Duration::from_seconds(.01));
   // Spin to receive latest state
