@@ -46,79 +46,91 @@ joint_trajectory_controller:
       "joint_trajectory_controller::state_interface_type_combinations": null,
     }
   }
-  speed_scaling: {
-
-    initial_scaling_factor: {
-      type: double,
-      default_value: 1.0,
-      read_only: true,
-      description: "Setting this parameter has effect only if the scaling is modified by a subscriber. The initial value of the scaling factor if no exchange with hardware takes place.",
-      validation: {
-        gt_eq<>: 0.0,
-      }
-    },
-
-    filter_coefficient: {
-      type: double,
-      default_value: 1.0,
-      description: "Specifies the filter coefficient for the scaling factor exponential filter.",
-      validation: {
-        gt_eq<>: 0.0,
-      }
-    },
-
-    policy: {
+  speed_scaling:
+    mode: {
       type: string,
-      default_value: "MINIMUM",
-      read_only: true,
-      description: "The policy to use to compare different sources of speed scaling factors (topics and/or state interface). Options are 'MINIMUM', 'MULTIPLY', 'MAXIMUM', and 'AVERAGE'.",
+      default_value: "OFF",
+      description: "The mode to use for speed scaling. Options are 'OFF', 'ON_ROBOT', and 'TRAJECTORY'.",
       validation: {
-        one_of<>: [["MINIMUM", "MULTIPLY", "MAXIMUM", "AVERAGE"]],
+        one_of<>: [["OFF", "ON_ROBOT", "TRAJECTORY"]],
       }
-    },
-
-    state_interface: {
-      type: string,
-      default_value: "",
-      read_only: true,
-      description: "Fully qualified name of the speed scaling state interface name"
-    },
-
-    subscribed_topics: {
-      type: string_array,
-      default_value: ["~/speed_scaling_input"],
-      description: "List of topics subscribed each providing different scaling factors",
-      validation: {
-      unique<>: null,
-      size_gt<>: [0],
-      }
-    },
-
-    command_interface: {
-      type: string,
-      default_value: "",
-      read_only: true,
-      description: "Command interface name used for setting the speed scaling factor on the hardware."
     }
-  }
+    on_robot:
+      initial_scaling_factor: {
+        type: double,
+        default_value: 1.0,
+        read_only: true,
+        description: "The initial value of the scaling factor if no exchange with hardware takes place.",
+        validation: {
+          gt_eq<>: 0.0,
+        }
+      }
+      state_interface: {
+        type: string,
+        default_value: "",
+        read_only: true,
+        description: "Fully qualified name of the speed scaling state interface name"
+      }
+      command_interface: {
+        type: string,
+        default_value: "",
+        read_only: true,
+        description: "Command interface name used for setting the speed scaling factor on the hardware."
+      }
 
-  limits:
-    override_urdf: {
-      type: bool, 
-      default_value: false,
-      description: "If flagged, velocity limits that are greater than the URDF values are considered",
-    }
-    __map_joints:
-      max_velocity: {
+    trajectory: 
+      initial_scaling_factor: {
         type: double,
-        default_value: .inf,
-        description: "Max velocity which overrides the URDF field. Accepted only if less than the URDF value, if present",
+        default_value: 1.0,
+        read_only: true,
+        description: "Setting this parameter has effect only if the scaling is modified by a subscriber. The initial value of the scaling factor if no exchange with hardware takes place.",
+        validation: {
+          gt_eq<>: 0.0,
+        }
       }
-      max_acceleration: {
+      filter_coefficient: {
         type: double,
-        default_value: .inf,
-        description: "Max acceleration which overrides the URDF field. Accepted only if less than the URDF value, if present",
+        default_value: 1.0,
+        description: "Specifies the filter coefficient for the scaling factor exponential filter.",
+        validation: {
+          gt_eq<>: 0.0,
+        }
       }
+      policy: {
+        type: string,
+        default_value: "MINIMUM",
+        read_only: true,
+        description: "The policy to use to compare different sources of speed scaling factors (topics and/or state interface). Options are 'MINIMUM', 'MULTIPLY', 'MAXIMUM', and 'AVERAGE'.",
+        validation: {
+          one_of<>: [["MINIMUM", "MULTIPLY", "MAXIMUM", "AVERAGE"]],
+        }
+      }
+      subscribed_topics: {
+        type: string_array,
+        default_value: ["~/speed_scaling_input"],
+        description: "List of topics subscribed each providing different scaling factors",
+        validation: {
+        unique<>: null,
+        size_gt<>: [0],
+        }
+      }
+      limits:
+        override_urdf: {
+          type: bool, 
+          default_value: false,
+          description: "If flagged, velocity limits that are greater than the URDF values are considered",
+        }
+        __map_joints:
+          max_velocity: {
+            type: double,
+            default_value: .inf,
+            description: "Max velocity which overrides the URDF field. Accepted only if less than the URDF value, if present",
+          }
+          max_acceleration: {
+            type: double,
+            default_value: .inf,
+            description: "Max acceleration which overrides the URDF field. Accepted only if less than the URDF value, if present",
+          }
 
   allow_partial_joints_goal: {
     type: bool,

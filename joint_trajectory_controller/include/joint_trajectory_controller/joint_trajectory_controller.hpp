@@ -126,10 +126,30 @@ protected:
 
   InterfaceReferences<hardware_interface::LoanedCommandInterface> joint_command_interface_;
   InterfaceReferences<hardware_interface::LoanedStateInterface> joint_state_interface_;
-  std::optional<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
-    scaling_state_interface_;
-  std::optional<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>
-    scaling_command_interface_;
+  struct OnRobotScalingMethod 
+  {
+    std::optional<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
+      state_interface_;
+    std::optional<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>
+      command_interface_;
+    // Things around speed scaling
+    std::atomic<double> factor_{1.0};
+    std::atomic<double> factor_cmd_{1.0};
+  } on_robot_scaling_;
+
+  struct TrajectoryScalingMethod
+  {
+    std::array<std::atomic<double>, 64> sources_map_;
+    std::array<std::string, 64> sources_topic_map_;
+    std::string reference_id_;
+
+    std::string policy_{""};
+    double filtered_factor_{1.0};
+    double feasible_factor_{1.0};
+    bool force_initial_factor_{false};
+  } trajectory_scaling_;
+
+  bool trajectory_scaling_active() const;
 
   bool has_position_state_interface_ = false;
   bool has_velocity_state_interface_ = false;
@@ -150,7 +170,8 @@ protected:
   std::vector<bool> joints_angle_wraparound_;
   // reserved storage for result of the command when closed loop pid adapter is used
   std::vector<double> tmp_command_;
-  
+
+
   // Timeout to consider commands old
   double cmd_timeout_;
   // True if holding position or repeating last trajectory point in case of success
@@ -297,19 +318,26 @@ private:
    * interval
    *
    */
-  bool set_scaling_factor(double scaling_factor, std::size_t idx);
+  bool set_on_robot_scaling_factor(double scaling_factor);
+
+   /**
+   * @brief Set scaling factor used for speed scaling the trajectory computation (also dynamically during execution)
+   *
+   * As main difference from 'set_on_robot_scaling_factor' that exploits the robot-hardware options, this function allows to 
+   * dynamically scale the computed trajectory before to feed it to the commanded hardware interface
+   *
+   * @param scaling_factor has to be >= 0
+   *
+   * @return True if the value was valid and set, false if the value is < 0
+   * interval
+   *
+   */
+  bool set_trajectory_scaling_factor(double scaling_factor, std::size_t idx);
 
   using SpeedScalingMsg = control_msgs::msg::SpeedScalingFactor;
-  std::vector<rclcpp::Subscription<SpeedScalingMsg>::SharedPtr> scaling_factor_subs_;
-  std::array<std::atomic<double>, 64> scaling_factor_sources_map_;
-  std::array<std::string, 64> scaling_factor_sources_topic_map_;
-  //std::size_t  scaling_factor_sources_number_{0};
-  std::string scaling_reference_id_;
-  // Things around speed scaling
-  std::string policy_{""};
-  double filtered_scaling_factor_{1.0};
-  double feasible_scaling_factor_{1.0};
-  bool force_initial_scaling_factor_{false};
+  rclcpp::Subscription<SpeedScalingMsg>::SharedPtr on_robot_scaling_factor_sub_;
+
+  std::vector<rclcpp::Subscription<SpeedScalingMsg>::SharedPtr> trajectory_scaling_factor_subs_;
 
   /**
    * @brief Assigns the values from a trajectory point interface to a joint interface.
@@ -337,7 +365,7 @@ private:
     }
   }
 
-  controller_interface::return_type update_scaling_factor();
+  controller_interface::return_type update_trajectory_scaling_factor();
 };
 
 }  // namespace joint_trajectory_controller

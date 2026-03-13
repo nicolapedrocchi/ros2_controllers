@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
-#include "joint_trajectory_controller/trajectory_utils.hpp"
-#include "joint_trajectory_controller/trajectory.hpp"
+
 
 #include <limits>
 #include <rcl/time.h>
 #include <urdf/model.h>
-#include "joint_limits/joint_limits.hpp"
+#include <joint_limits/joint_limits.hpp>
 #include <control_toolbox/filters.hpp>
 
 #include <chrono>
@@ -33,6 +32,8 @@
 #include "angles/angles.h"
 #include "controller_interface/helpers.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "joint_trajectory_controller/trajectory_utils.hpp"
+#include "joint_trajectory_controller/trajectory.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/qos.hpp"
@@ -133,10 +134,13 @@ JointTrajectoryController::command_interface_configuration() const
       conf.names.push_back(joint_name + "/" + interface_type);
     }
   }
-  if (!params_.speed_scaling.command_interface.empty())
+  if (params_.speed_scaling.mode == "ON_ROBOT")
   {
-    conf.names.push_back(params_.speed_scaling.command_interface);
-  }
+    if (!params_.speed_scaling.on_robot.command_interface.empty())
+    {
+      conf.names.push_back(params_.speed_scaling.on_robot.command_interface);
+    }
+  } 
   return conf;
 }
 
@@ -153,9 +157,12 @@ JointTrajectoryController::state_interface_configuration() const
       conf.names.push_back(joint_name + "/" + interface_type);
     }
   }
-  if (!params_.speed_scaling.state_interface.empty())
+  if (params_.speed_scaling.mode == "ON_ROBOT")
   {
-    conf.names.push_back(params_.speed_scaling.state_interface);
+    if (!params_.speed_scaling.on_robot.state_interface.empty())
+    {
+      conf.names.push_back(params_.speed_scaling.on_robot.state_interface);
+    }
   }
   return conf;
 }
@@ -164,19 +171,28 @@ controller_interface::return_type JointTrajectoryController::update(
   const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   auto logger = this->get_node()->get_logger();
-  
-  
-  if(update_scaling_factor() == controller_interface::return_type::ERROR)
+  if (on_robot_scaling_.state_interface_.has_value())
   {
-    return controller_interface::return_type::OK;
+    auto scaling_state_interface_op = on_robot_scaling_.state_interface_->get().get_optional();
+    if (!scaling_state_interface_op.has_value())
+    {
+      RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
+      return controller_interface::return_type::OK;
+    }
+    on_robot_scaling_.factor_ = scaling_state_interface_op.value();
   }
 
-  if (scaling_command_interface_.has_value())
+  if (on_robot_scaling_.command_interface_.has_value())
   {
-    if (!scaling_command_interface_->get().set_value(feasible_scaling_factor_))
+    if (!on_robot_scaling_.command_interface_->get().set_value(on_robot_scaling_.factor_cmd_.load()))
     {
-      RCLCPP_ERROR(logger, "Could not  set speed scaling factor through command interfaces.");
+      RCLCPP_ERROR(logger, "Could not set speed scaling factor through command interfaces.");
     }
+  }
+
+  if(trajectory_scaling_active() && update_trajectory_scaling_factor() == controller_interface::return_type::ERROR)
+  {
+    return controller_interface::return_type::OK;
   }
 
   // update dynamic parameters
@@ -217,7 +233,7 @@ controller_interface::return_type JointTrajectoryController::update(
   // currently carrying out a trajectory
   if (has_active_trajectory())
   {
-    double feasible_scaling_derivative = 1.0;
+    double trajectory_scaling_feasible_derivative = 1.0;
     bool first_sample = false;
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // if sampling the first time, set the point before you sample
@@ -239,36 +255,60 @@ controller_interface::return_type JointTrajectoryController::update(
           time, state_current_, joints_angle_wraparound_);
       }
       traj_time_ = time;
-      feasible_scaling_factor_ = filtered_scaling_factor_;
+      if(trajectory_scaling_active())
+      {
+        trajectory_scaling_.feasible_factor_ = trajectory_scaling_.filtered_factor_;
+      }
     }
     else // the trajectory has been sampled, i.e., the sample function has been called!
     {
-      if (traj_time_ < current_trajectory_->time_from_start())
+      if(!trajectory_scaling_active())
       {
-        traj_time_ = traj_time_ + period;
+        traj_time_ += period * on_robot_scaling_.factor_.load();
       }
       else
-      { 
-        auto time_from_start = traj_time_ - current_trajectory_->time_from_start();
-        std::tie(time_from_start, feasible_scaling_factor_, feasible_scaling_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
-           current_trajectory_->get_trajectory_msg(), time_from_start, period, filtered_scaling_factor_, feasible_scaling_factor_, max_velocities_, max_accelerations_);
-        traj_time_ = current_trajectory_->time_from_start() + time_from_start;
+      {
+        if (traj_time_ < current_trajectory_->time_from_start())
+        {
+          traj_time_ = traj_time_ + period;
+        }
+        else
+        { 
+          auto time_from_start = traj_time_ - current_trajectory_->time_from_start();
+          std::tie(time_from_start, trajectory_scaling_.feasible_factor_, trajectory_scaling_feasible_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
+            current_trajectory_->get_trajectory_msg(), time_from_start, period, trajectory_scaling_.filtered_factor_, trajectory_scaling_.feasible_factor_, max_velocities_, max_accelerations_);
+          traj_time_ = current_trajectory_->time_from_start() + time_from_start;
+        }
       }
     }
+
     // Sample expected state from the trajectory
     current_trajectory_->sample(
       traj_time_, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
     state_desired_.time_from_start = traj_time_ - current_trajectory_->time_from_start();
-    trajectory_utils::apply_scaling_factor(feasible_scaling_factor_, feasible_scaling_derivative,state_desired_);
+    if(trajectory_scaling_active())
+    {
+      trajectory_utils::apply_scaling_factor(trajectory_scaling_.feasible_factor_, trajectory_scaling_feasible_derivative,state_desired_);
+    }
 
     const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
 
     // Sample setpoint for next control cycle
-    const bool valid_point = current_trajectory_->sample(
-      traj_time_ + update_period_ * feasible_scaling_factor_, interpolation_method_, command_next_, start_segment_itr,
+    bool valid_point;
+    if(!trajectory_scaling_active())
+    {
+      valid_point = current_trajectory_->sample(
+        traj_time_ + update_period_, interpolation_method_, command_next_, start_segment_itr,
+        end_segment_itr, false);
+    } 
+    else
+    {
+      valid_point = current_trajectory_->sample(
+      traj_time_ + update_period_ * trajectory_scaling_.feasible_factor_, interpolation_method_, command_next_, start_segment_itr,
       end_segment_itr, false);
 
-    trajectory_utils::apply_scaling_factor(feasible_scaling_factor_, feasible_scaling_derivative,command_next_);
+      trajectory_utils::apply_scaling_factor(trajectory_scaling_.feasible_factor_, trajectory_scaling_feasible_derivative,command_next_);
+    }
 
     state_current_.time_from_start = time - current_trajectory_->time_from_start();
 
@@ -489,7 +529,10 @@ controller_interface::return_type JointTrajectoryController::update(
   }
   else
   {
-    feasible_scaling_factor_ = filtered_scaling_factor_;
+    if(trajectory_scaling_active())
+    {
+      trajectory_scaling_.feasible_factor_ = trajectory_scaling_.filtered_factor_;
+    }
   }
 
   publish_state(time, state_desired_, state_current_, state_error_);
@@ -1056,65 +1099,93 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
     std::string(get_node()->get_name()) + "/query_state",
     std::bind(&JointTrajectoryController::query_state_service, this, _1, _2));
 
-  if (!params_.speed_scaling.policy.empty())
+  if (params_.speed_scaling.mode=="TRAJECTORY")
   {
-    RCLCPP_INFO(
-      logger, "Using speed scaling policy '%s'.",
-      params_.speed_scaling.policy.c_str());
-      policy_ = params_.speed_scaling.policy;
-  }
-  else 
-  {
-    RCLCPP_INFO(
-      logger,
-      "No speed scaling policy set. Default MULTIPLY policy superimposed.");
-    policy_ = "MULTIPLY";
-  }
-
-  if (!has_effort_command_interface_)
-  {
-    auto qos = rclcpp::SystemDefaultsQoS();
-    qos.transient_local();
-    scaling_factor_subs_.clear();
-    for(const auto& topic: params_.speed_scaling.subscribed_topics)
+    if(!params_.speed_scaling.trajectory.policy.empty())
     {
-      std::size_t idx = scaling_factor_subs_.size();
-      RCLCPP_INFO(logger, "The controller is listening the topic %s (#%ld)", topic.c_str(), idx);
-      scaling_factor_sources_topic_map_.at(idx) = topic;
-      scaling_factor_sources_map_.at(idx).store(params_.speed_scaling.initial_scaling_factor);
-      scaling_factor_subs_.push_back(
-          get_node()->create_subscription<SpeedScalingMsg>(
-            topic, qos,
-            [this,idx](const SpeedScalingMsg & msg) { set_scaling_factor(msg.factor, idx); }));
       RCLCPP_INFO(
-        logger, "Setting initial scaling factor to %2f",
-        params_.speed_scaling.initial_scaling_factor);
+        logger, "Using speed scaling policy '%s'.",
+        params_.speed_scaling.trajectory.policy.c_str());
+        trajectory_scaling_.policy_ = params_.speed_scaling.trajectory.policy;
+    }
+    else 
+    {
+      RCLCPP_INFO(
+        logger,
+        "No speed scaling policy set. Default MULTIPLY policy superimposed.");
+      trajectory_scaling_.policy_ = "MULTIPLY";
     }
   }
-  else
+
+  if (params_.speed_scaling.mode=="ON_ROBOT")
   {
-    RCLCPP_WARN_EXPRESSION(
-      logger, params_.speed_scaling.initial_scaling_factor != 1.0,
-      "Speed scaling is currently only supported for position interfaces. If you want to make use "
-      "of speed scaling, please only use a position interface when configuring this controller.");
+    if (
+        !has_velocity_command_interface_ && !has_acceleration_command_interface_ &&
+        !has_effort_command_interface_)
+      {
+        auto qos = rclcpp::SystemDefaultsQoS();
+        qos.transient_local();
+        on_robot_scaling_factor_sub_ = get_node()->create_subscription<SpeedScalingMsg>(
+          "~/speed_scaling_input", qos,
+          [&](const SpeedScalingMsg & msg) { set_on_robot_scaling_factor(msg.factor); });
+        RCLCPP_INFO(
+          logger, "Setting initial scaling factor to %2f",
+          params_.speed_scaling.on_robot.initial_scaling_factor);
+        on_robot_scaling_.factor_ = params_.speed_scaling.on_robot.initial_scaling_factor;
+      }
+      else
+      {
+        RCLCPP_WARN_EXPRESSION(
+          logger, params_.speed_scaling.on_robot.initial_scaling_factor != 1.0,
+          "Speed scaling is currently only supported for position interfaces. If you want to make use "
+          "of speed scaling, please only use a position interface when configuring this controller.");
+        on_robot_scaling_.factor_ = 1.0;
+      }
+      if (!params_.speed_scaling.on_robot.state_interface.empty())
+      {
+        RCLCPP_INFO(
+          logger, "Using scaling state from the hardware from interface %s.",
+          params_.speed_scaling.on_robot.state_interface.c_str());
+      }
+      else
+      {
+        RCLCPP_INFO(
+          get_node()->get_logger(),
+          "No scaling interface set. This controller will not read speed scaling from the hardware.");
+      }
+      on_robot_scaling_.factor_cmd_.store(on_robot_scaling_.factor_.load());
   }
-  if (!params_.speed_scaling.state_interface.empty())
+  else if (params_.speed_scaling.mode=="TRAJECTORY")
   {
-    RCLCPP_INFO(
-      logger, "Using scaling state from the hardware from interface %s.",
-      params_.speed_scaling.state_interface.c_str());
-    scaling_reference_id_ = "scaling_state_interface_op_";
-    scaling_reference_id_ += std::to_string(std::hash<std::string>{}(scaling_reference_id_));
-    const std::size_t& number_of_scaling_factor_sources = scaling_factor_subs_.size();
-    scaling_factor_sources_map_.at(number_of_scaling_factor_sources).store(params_.speed_scaling.initial_scaling_factor);
+    if (!has_effort_command_interface_)
+    {
+      auto qos = rclcpp::SystemDefaultsQoS();
+      qos.transient_local();
+      trajectory_scaling_factor_subs_.clear();
+      for(const auto& topic: params_.speed_scaling.trajectory.subscribed_topics)
+      {
+        std::size_t idx = trajectory_scaling_factor_subs_.size();
+        RCLCPP_INFO(logger, "The controller is listening the topic %s (#%ld)", topic.c_str(), idx);
+        trajectory_scaling_.sources_topic_map_.at(idx) = topic;
+        trajectory_scaling_.sources_map_.at(idx).store(params_.speed_scaling.trajectory.initial_scaling_factor);
+        trajectory_scaling_factor_subs_.push_back(
+            get_node()->create_subscription<SpeedScalingMsg>(
+              topic, qos,
+              [this,idx](const SpeedScalingMsg & msg) { set_trajectory_scaling_factor(msg.factor, idx); }));
+        RCLCPP_INFO(
+          logger, "Setting initial scaling factor to %2f",
+          params_.speed_scaling.trajectory.initial_scaling_factor);
+      }
+    }
+    else
+    {
+      RCLCPP_WARN_EXPRESSION(
+        logger, params_.speed_scaling.trajectory.initial_scaling_factor != 1.0,
+        "Speed scaling is currently only supported for position interfaces. If you want to make use "
+        "of speed scaling, please only use a position interface when configuring this controller.");
+    }
+    trajectory_scaling_.force_initial_factor_ = true;
   }
-  else
-  {
-    RCLCPP_INFO(
-      get_node()->get_logger(),
-      "No scaling interface set. This controller will not read speed scaling from the hardware.");
-  }
-  force_initial_scaling_factor_ = true;
 
   if (get_update_rate() == 0)
   {
@@ -1147,48 +1218,46 @@ controller_interface::CallbackReturn JointTrajectoryController::on_activate(
   default_tolerances_ = get_segment_tolerances(logger, params_);
 
   // Set scaling interfaces
-  if (!params_.speed_scaling.state_interface.empty())
+  if (params_.speed_scaling.mode=="ON_ROBOT")
   {
-    auto it = std::find_if(
-      state_interfaces_.begin(), state_interfaces_.end(), [&](auto & interface)
-      { return (interface.get_name() == params_.speed_scaling.state_interface); });
-    if (it != state_interfaces_.end())
+    if(!params_.speed_scaling.on_robot.state_interface.empty())
     {
-      scaling_state_interface_ = *it;
-      if (scaling_state_interface_.has_value())
+      auto it = std::find_if(
+        state_interfaces_.begin(), state_interfaces_.end(), [&](auto & interface)
+        { return (interface.get_name() == params_.speed_scaling.on_robot.state_interface); });
+      if (it != state_interfaces_.end())
       {
-        auto scaling_state_interface_op = scaling_state_interface_->get().get_optional();
-        if (!scaling_state_interface_op.has_value())
-        {
-          RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
-        }
-        filtered_scaling_factor_ = feasible_scaling_factor_ = scaling_state_interface_op.value();
+        on_robot_scaling_.state_interface_ = *it;
+      }
+      else
+      {
+        RCLCPP_ERROR(
+          logger, "Did not find speed scaling interface '%s' in state interfaces.",
+          params_.speed_scaling.on_robot.state_interface.c_str());
+        return CallbackReturn::ERROR;
       }
     }
-    else
+    if (!params_.speed_scaling.on_robot.command_interface.empty())
     {
-      RCLCPP_ERROR(
-        logger, "Did not find speed scaling interface '%s' in state interfaces.",
-        params_.speed_scaling.state_interface.c_str());
-      return CallbackReturn::ERROR;
+      auto it = std::find_if(
+        command_interfaces_.begin(), command_interfaces_.end(), [&](auto & interface)
+        { return (interface.get_name() == params_.speed_scaling.on_robot.command_interface); });
+      if (it != command_interfaces_.end())
+      {
+        on_robot_scaling_.command_interface_ = *it;
+      }
+      else
+      {
+        RCLCPP_ERROR(
+          logger, "Did not find speed scaling interface '%s' in command interfaces.",
+          params_.speed_scaling.on_robot.command_interface.c_str());
+        return CallbackReturn::ERROR;
+      }
     }
   }
-  if (!params_.speed_scaling.command_interface.empty())
+  else if (params_.speed_scaling.mode=="TRAJECTORY")
   {
-    auto it = std::find_if(
-      command_interfaces_.begin(), command_interfaces_.end(), [&](auto & interface)
-      { return (interface.get_name() == params_.speed_scaling.command_interface); });
-    if (it != command_interfaces_.end())
-    {
-      scaling_command_interface_ = *it;
-    }
-    else
-    {
-      RCLCPP_ERROR(
-        logger, "Did not find speed scaling interface '%s' in command interfaces.",
-        params_.speed_scaling.command_interface.c_str());
-      return CallbackReturn::ERROR;
-    }
+    trajectory_scaling_.filtered_factor_ = trajectory_scaling_.feasible_factor_ = params_.speed_scaling.trajectory.initial_scaling_factor;
   }
 
   // order all joints in the storage
@@ -1407,7 +1476,7 @@ void JointTrajectoryController::publish_state(
     {
       state_msg_.output = command_current_;
     }
-    state_msg_.speed_scaling_factor = feasible_scaling_factor_;
+    state_msg_.speed_scaling_factor = trajectory_scaling_active() ? trajectory_scaling_.feasible_factor_ : on_robot_scaling_.factor_.load();
 
     state_publisher_->try_publish(state_msg_);
   }
@@ -1923,7 +1992,7 @@ void JointTrajectoryController::resize_joint_trajectory_point_command(
   }
 }
 
-bool JointTrajectoryController::set_scaling_factor(double scaling_factor, std::size_t idx)
+bool JointTrajectoryController::set_on_robot_scaling_factor(double scaling_factor)
 {
   if (scaling_factor < 0)
   {
@@ -1933,7 +2002,41 @@ bool JointTrajectoryController::set_scaling_factor(double scaling_factor, std::s
     return false;
   }
 
-  scaling_factor_sources_map_.at(idx).store(scaling_factor);
+  if (scaling_factor != on_robot_scaling_.factor_.load())
+  {
+    RCLCPP_INFO(
+      get_node()->get_logger().get_child("speed_scaling"), "New scaling factor will be %f",
+      scaling_factor);
+  }
+  on_robot_scaling_.factor_.store(scaling_factor);
+  if (
+    params_.speed_scaling.on_robot.command_interface.empty() &&
+    !params_.speed_scaling.on_robot.state_interface.empty())
+  {
+    RCLCPP_WARN_ONCE(
+      get_node()->get_logger(),
+      "Setting the scaling factor while only one-way communication with the hardware is setup. "
+      "This will likely get overwritten by the hardware again. If available, please also setup "
+      "the speed_scaling_command_interface_name");
+  }
+  else
+  {
+    on_robot_scaling_.factor_cmd_.store(scaling_factor);
+  }
+  return true;
+}
+
+bool JointTrajectoryController::set_trajectory_scaling_factor(double scaling_factor, std::size_t idx)
+{
+  if (scaling_factor < 0)
+  {
+    RCLCPP_WARN(
+      get_node()->get_logger(),
+      "Scaling factor has to be greater or equal to 0.0 - Ignoring input!");
+    return false;
+  }
+
+  trajectory_scaling_.sources_map_.at(idx).store(scaling_factor);
   
   return true;
 }
@@ -2010,86 +2113,88 @@ void JointTrajectoryController::set_kinematic_limits_from_urdf()
 
 void JointTrajectoryController::update_kinematic_limits_from_parameters()
 {
-
-  for (const auto & joint_name: params_.joints)
+  if (trajectory_scaling_active())
   {
-    const auto & limits = params_.limits.joints_map.at(joint_name);
-    if (limits.max_velocity > 0.0)
+    for (const auto & joint_name: params_.joints)
     {
-      if( max_velocities_.find(joint_name) == max_velocities_.end() || params_.limits.override_urdf)
+      const auto & limits = params_.speed_scaling.trajectory.limits.joints_map.at(joint_name);
+      if (limits.max_velocity > 0.0)
       {
-        max_velocities_[joint_name] = limits.max_velocity;
+        if( max_velocities_.find(joint_name) == max_velocities_.end() || params_.speed_scaling.trajectory.limits.override_urdf)
+        {
+          max_velocities_[joint_name] = limits.max_velocity;
+        }
+        else
+        {
+          max_velocities_[joint_name] = std::min(limits.max_velocity, max_velocities_[joint_name]);
+        }
       }
-      else
+      if (limits.max_acceleration > 0.0)
       {
-        max_velocities_[joint_name] = std::min(limits.max_velocity, max_velocities_[joint_name]);
-      }
-    }
-    if (limits.max_acceleration > 0.0)
-    {
-      if( max_accelerations_.find(joint_name) == max_accelerations_.end() || params_.limits.override_urdf)
-      {
-        max_accelerations_[joint_name] = limits.max_acceleration;
-      }
-      else
-      {
+        if( max_accelerations_.find(joint_name) == max_accelerations_.end() || params_.speed_scaling.trajectory.limits.override_urdf)
+        {
+          max_accelerations_[joint_name] = limits.max_acceleration;
+        }
+        else
+        {
+          max_accelerations_[joint_name] = std::min(limits.max_acceleration, max_accelerations_[joint_name]);
+        }
         max_accelerations_[joint_name] = std::min(limits.max_acceleration, max_accelerations_[joint_name]);
       }
-      max_accelerations_[joint_name] = std::min(limits.max_acceleration, max_accelerations_[joint_name]);
     }
   }
 }
 
-controller_interface::return_type JointTrajectoryController::update_scaling_factor()
+controller_interface::return_type JointTrajectoryController::update_trajectory_scaling_factor()
 {
+  if(!trajectory_scaling_active())
+  {
+    return controller_interface::return_type::OK;
+  }
+
   auto logger = this->get_node()->get_logger();
 
   double scaling_factor{1.0};
-  if(force_initial_scaling_factor_)
+  if(trajectory_scaling_.force_initial_factor_)
   {
-    RCLCPP_INFO(logger, "Imposing the initial scaling %f", params_.speed_scaling.initial_scaling_factor);
-    scaling_factor = params_.speed_scaling.initial_scaling_factor;
-    filtered_scaling_factor_ = params_.speed_scaling.initial_scaling_factor;
-    force_initial_scaling_factor_ = false;
+    RCLCPP_INFO(logger, "Imposing the initial scaling %f", params_.speed_scaling.trajectory.initial_scaling_factor);
+    scaling_factor = params_.speed_scaling.trajectory.initial_scaling_factor;
+    trajectory_scaling_.filtered_factor_ = params_.speed_scaling.trajectory.initial_scaling_factor;
+    trajectory_scaling_.force_initial_factor_ = false;
   }
 
-  if (scaling_state_interface_.has_value())
-  {
-    auto scaling_state_interface_op = scaling_state_interface_->get().get_optional();
-    if (!scaling_state_interface_op.has_value())
-    {
-      RCLCPP_DEBUG(logger, "Unable to retrieve scaling state interface value");
-      return controller_interface::return_type::ERROR;
-    }
-    const std::size_t& idx_scaling_state_interface = scaling_factor_subs_.size();
-    scaling_factor_sources_map_.at(idx_scaling_state_interface).store(scaling_state_interface_op.value());
-  }
-
-  if(scaling_factor_sources_map_.size()==0)
+  if(trajectory_scaling_.sources_map_.size()==0)
   {
     scaling_factor = 1.0;
   }
   else
   {
-    double _scaling = (policy_  == "AVERAGE") ? 0.0 : 1.0;
+    double _scaling = (trajectory_scaling_.policy_  == "AVERAGE") ? 0.0 : 1.0;
     { 
-      for(std::size_t i=0; i< scaling_factor_subs_.size(); i++)
+      for(std::size_t i=0; i< trajectory_scaling_factor_subs_.size(); i++)
       {
-        if(policy_  == "MINIMUM")
-          _scaling = std::min(_scaling, scaling_factor_sources_map_.at(i).load());
-        else if(policy_  == "MULTIPLY")
-        _scaling *= scaling_factor_sources_map_.at(i).load();
-        else if(policy_  == "MAXIMUM")
-          _scaling = std::max(_scaling, scaling_factor_sources_map_.at(i).load());
-        else if(policy_  == "AVERAGE")
-          _scaling += scaling_factor_sources_map_.at(i).load() / double(scaling_factor_subs_.size());
+        if(trajectory_scaling_.policy_  == "MINIMUM")
+          _scaling = std::min(_scaling, trajectory_scaling_.sources_map_.at(i).load());
+        else if(trajectory_scaling_.policy_  == "MULTIPLY")
+        _scaling *= trajectory_scaling_.sources_map_.at(i).load();
+        else if(trajectory_scaling_.policy_  == "MAXIMUM")
+          _scaling = std::max(_scaling, trajectory_scaling_.sources_map_.at(i).load());
+        else if(trajectory_scaling_.policy_  == "AVERAGE")
+          _scaling += trajectory_scaling_.sources_map_.at(i).load() / double(trajectory_scaling_factor_subs_.size());
       }
     }
     scaling_factor = _scaling;
   }
 
-  filtered_scaling_factor_ = filters::exponentialSmoothing(scaling_factor, filtered_scaling_factor_, params_.speed_scaling.filter_coefficient);
+  trajectory_scaling_.filtered_factor_ = filters::exponentialSmoothing(scaling_factor, trajectory_scaling_.filtered_factor_, params_.speed_scaling.trajectory.filter_coefficient);
   return controller_interface::return_type::OK;
+}
+
+bool JointTrajectoryController::trajectory_scaling_active() const
+{
+  // Since the params could be updated anytime, I first check if the on_robot_scaling is properly configured, if so, I give it the priority over the trajectory scaling mode, otherwise I check the trajectory scaling mode
+  return (on_robot_scaling_.command_interface_.has_value() && !params_.speed_scaling.on_robot.command_interface.empty() ) ? false : 
+            params_.speed_scaling.mode == "TRAJECTORY";
 }
 
 
