@@ -504,6 +504,7 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
     // If tau_i is beyond the last trajectory point, nothing to scale — exit.
     if(k_itr == trajectory_msg->points.end())
     {
+      RCLCPP_WARN(rclcpp::get_logger("joint_trajectory_controller"), "tau_i is beyond the last trajectory point.");
       break;
     }
     
@@ -582,14 +583,14 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
       // Velocity constraint violated even before checking acceleration.
       // Override dtau_i with the tightest per-joint velocity-ratio:
       //   dtau_i = min_j( v_max[j] / |v_k[j]| )  * 0.99  (safety margin)
-      std::stringstream ss; 
-      ss << "dtau_i" << dtau_i << " ";
-      ss << "v_k=["; for(const auto & v : v_k) { ss<<v<<","; } ss << "] ";
-      ss << "_v_k=["; for(const auto & v : _v_k) { ss<<v<<","; } ss << "] ";
-      ss << "v_max=["; for(const auto & v : max_velocities) { ss<<v.second<<","; } ss << "] ";
+      std::stringstream ss1; 
+      ss1 << "dtau_i" << dtau_i << " ";
+      ss1 << "v_k=["; for(const auto & v : v_k) { ss1<<v<<","; } ss1 << "] ";
+      ss1 << "_v_k=["; for(const auto & v : _v_k) { ss1<<v<<","; } ss1 << "] ";
+      ss1 << "v_max=["; for(const auto & v : max_velocities) { ss1<<v.second<<","; } ss1 << "] ";
       RCLCPP_WARN(rclcpp::get_logger("joint_trajectory_controller"), 
           "\u001B[32m"
-          "Override Scaling factor to preserve max velocity! %s ", ss.str().c_str());
+          "Override Scaling factor to preserve max velocity! %s ", ss1.str().c_str());
 
       // Since the leqt check above already verified that at least one joint violates the velocity constraint, 
       // we are guaranteed to reduce dtau_i by at least some positive amount in this step, 

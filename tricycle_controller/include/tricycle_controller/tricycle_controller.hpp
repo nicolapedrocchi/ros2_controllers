@@ -19,6 +19,7 @@
 #ifndef TRICYCLE_CONTROLLER__TRICYCLE_CONTROLLER_HPP_
 #define TRICYCLE_CONTROLLER__TRICYCLE_CONTROLLER_HPP_
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -33,8 +34,8 @@
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp_lifecycle/state.hpp"
-#include "realtime_tools/realtime_box.hpp"
 #include "realtime_tools/realtime_publisher.hpp"
+#include "realtime_tools/realtime_thread_safe_box.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_msgs/msg/tf_message.hpp"
 
@@ -76,6 +77,11 @@ public:
 
   CallbackReturn on_error(const rclcpp_lifecycle::State & previous_state) override;
 
+  void reset_odometry(
+    const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+    std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
 protected:
   struct TractionHandle
   {
@@ -106,17 +112,20 @@ protected:
   std::shared_ptr<rclcpp::Publisher<AckermannDrive>> ackermann_command_publisher_ = nullptr;
   std::shared_ptr<realtime_tools::RealtimePublisher<AckermannDrive>>
     realtime_ackermann_command_publisher_ = nullptr;
+  AckermannDrive ackermann_command_msg_;
 
   Odometry odometry_;
 
   std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odometry_publisher_ = nullptr;
   std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::msg::Odometry>>
     realtime_odometry_publisher_ = nullptr;
+  nav_msgs::msg::Odometry odometry_msg_;
 
   std::shared_ptr<rclcpp::Publisher<tf2_msgs::msg::TFMessage>> odometry_transform_publisher_ =
     nullptr;
   std::shared_ptr<realtime_tools::RealtimePublisher<tf2_msgs::msg::TFMessage>>
     realtime_odometry_transform_publisher_ = nullptr;
+  tf2_msgs::msg::TFMessage tf_msg_;
 
   // Timeout to consider cmd_vel commands old
   std::chrono::milliseconds cmd_vel_timeout_{500};
@@ -124,10 +133,12 @@ protected:
   bool subscriber_is_active_ = false;
   rclcpp::Subscription<TwistStamped>::SharedPtr velocity_command_subscriber_ = nullptr;
 
-  realtime_tools::RealtimeBox<std::shared_ptr<TwistStamped>> received_velocity_msg_ptr_{nullptr};
+  realtime_tools::RealtimeThreadSafeBox<std::shared_ptr<TwistStamped>> received_velocity_msg_ptr_{
+    nullptr};
   std::shared_ptr<TwistStamped> last_command_msg_;
 
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr reset_odom_service_;
+  std::atomic<bool> reset_odom_{false};
 
   std::queue<AckermannDrive> previous_commands_;  // last two commands
 
@@ -135,10 +146,6 @@ protected:
   TractionLimiter limiter_traction_;
   SteeringLimiter limiter_steering_;
 
-  void reset_odometry(
-    const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<std_srvs::srv::Empty::Request> req,
-    std::shared_ptr<std_srvs::srv::Empty::Response> res);
   bool reset();
   void halt();
 };

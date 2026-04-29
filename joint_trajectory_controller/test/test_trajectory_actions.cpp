@@ -77,31 +77,6 @@ protected:
     executor_future_handle_ = std::async(std::launch::async, [&]() -> void { executor_.spin(); });
   }
 
-  void SubscribeToState()
-  {
-    auto traj_lifecycle_node = traj_controller_->get_node();
-
-    using control_msgs::msg::JointTrajectoryControllerState;
-
-    auto qos = rclcpp::SensorDataQoS();
-    // Needed, otherwise spin_some() returns only the oldest message in the queue
-    // I do not understand why spin_some provides only one message
-    qos.keep_last(1);
-    state_subscriber_ = traj_lifecycle_node->create_subscription<JointTrajectoryControllerState>(
-      controller_name_ + "/controller_state", qos,
-      [&](std::shared_ptr<JointTrajectoryControllerState> msg)
-      {
-        std::lock_guard<std::mutex> guard(state_mutex_);
-        state_msg_ = msg;
-      });
-  }
-
-  std::shared_ptr<control_msgs::msg::JointTrajectoryControllerState> getState() const
-  {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    return state_msg_;
-  }
-
   void SetUpControllerHardware()
   {
     setup_controller_hw_ = true;
@@ -305,11 +280,7 @@ TEST_P(TestTrajectoryActionsTestParameterized, test_success_single_point_with_ve
   // deactivate velocity tolerance and allow velocity at trajectory end
   std::vector<rclcpp::Parameter> params = {
     rclcpp::Parameter("constraints.stopped_velocity_tolerance", 0.0),
-    rclcpp::Parameter("allow_nonzero_velocity_at_trajectory_end", true),
-      rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 20.0),};
+    rclcpp::Parameter("allow_nonzero_velocity_at_trajectory_end", true)};
   SetUpExecutor(params, false, 1.0, 0.0);
   SetUpControllerHardware();
 
@@ -403,12 +374,7 @@ TEST_P(TestTrajectoryActionsTestParameterized, test_success_multi_point_with_vel
   // deactivate velocity tolerance and allow velocity at trajectory end
   std::vector<rclcpp::Parameter> params = {
     rclcpp::Parameter("constraints.stopped_velocity_tolerance", 0.0),
-    rclcpp::Parameter("allow_nonzero_velocity_at_trajectory_end", true),
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 20.0)
-  };
+    rclcpp::Parameter("allow_nonzero_velocity_at_trajectory_end", true)};
   SetUpExecutor(params, false, 1.0, 0.0);
   SetUpControllerHardware();
 
@@ -921,15 +887,128 @@ TEST_P(TestTrajectoryActionsTestParameterized, test_cancel_hold_position)
   expectCommandPoint(cancelled_position);
 }
 
+TEST_P(TestTrajectoryActionsTestParameterized, test_cancel_decelerate_to_hold_position)
+{
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+  SetUpExecutor(params);
+  SetUpControllerHardware();
+
+  std::shared_future<typename GoalHandle::SharedPtr> gh_future;
+  // send goal
+  {
+    std::vector<JointTrajectoryPoint> points;
+    JointTrajectoryPoint point;
+    point.time_from_start = rclcpp::Duration::from_seconds(1.0);
+    point.positions.resize(joint_names_.size());
+    point.velocities.resize(joint_names_.size());
+
+    point.positions[0] = 4.0;
+    point.positions[1] = 5.0;
+    point.positions[2] = 6.0;
+    // canceled trajectory should not end with these velocities
+    point.velocities[0] = 4.0;
+    point.velocities[1] = 5.0;
+    point.velocities[2] = 6.0;
+    points.push_back(point);
+
+    control_msgs::action::FollowJointTrajectory_Goal goal_msg;
+    goal_msg.goal_time_tolerance = rclcpp::Duration::from_seconds(2.0);
+    goal_msg.trajectory.joint_names = joint_names_;
+    goal_msg.trajectory.points = points;
+
+    // send and wait for half a second before cancel
+    gh_future = action_client_->async_send_goal(goal_msg, goal_options_);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    const auto goal_handle = gh_future.get();
+    action_client_->async_cancel_goal(goal_handle);
+  }
+  controller_hw_thread_.join();
+
+  EXPECT_TRUE(gh_future.get());
+  EXPECT_EQ(rclcpp_action::ResultCode::CANCELED, common_resultcode_);
+  EXPECT_EQ(
+    control_msgs::action::FollowJointTrajectory_Result::SUCCESSFUL, common_action_result_code_);
+
+  // run update for long enough to allow the joints to come to a stop
+  updateControllerAsync(rclcpp::Duration::from_seconds(0.5));
+  std::vector<double> cancelled_position{joint_pos_[0], joint_pos_[1], joint_pos_[2]};
+
+  if (traj_controller_->has_velocity_state_interface())
+  {
+    // we expect a non-trivial hold trajectory that ramps the velocity to zero
+    expectCommandPoint(cancelled_position, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, false);
+  }
+  else
+  {
+    // decelerate_to_hold_position requires velocity state so this should fall back to
+    // set_hold_position i.e., active but trivial trajectory (one point only)
+    expectCommandPoint(cancelled_position);
+  }
+}
+
+TEST_P(TestTrajectoryActionsTestParameterized, test_cancel_decelerate_fallback)
+{
+  // parameter `constraints.jointX.max_deceleration_on_cancel` defaults to 0.0 which should
+  // force the controller to fall back to set_hold_position
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+  SetUpExecutor(params);
+  SetUpControllerHardware();
+
+  std::shared_future<typename GoalHandle::SharedPtr> gh_future;
+  // send goal
+  {
+    std::vector<JointTrajectoryPoint> points;
+    JointTrajectoryPoint point;
+    point.time_from_start = rclcpp::Duration::from_seconds(1.0);
+    point.positions.resize(joint_names_.size());
+    point.velocities.resize(joint_names_.size());
+
+    point.positions[0] = 4.0;
+    point.positions[1] = 5.0;
+    point.positions[2] = 6.0;
+    // canceled trajectory should not end with these velocities
+    point.velocities[0] = 4.0;
+    point.velocities[1] = 5.0;
+    point.velocities[2] = 6.0;
+    points.push_back(point);
+
+    control_msgs::action::FollowJointTrajectory_Goal goal_msg;
+    goal_msg.goal_time_tolerance = rclcpp::Duration::from_seconds(2.0);
+    goal_msg.trajectory.joint_names = joint_names_;
+    goal_msg.trajectory.points = points;
+
+    // send and wait for half a second before cancel
+    gh_future = action_client_->async_send_goal(goal_msg, goal_options_);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    const auto goal_handle = gh_future.get();
+    action_client_->async_cancel_goal(goal_handle);
+  }
+  controller_hw_thread_.join();
+
+  EXPECT_TRUE(gh_future.get());
+  EXPECT_EQ(rclcpp_action::ResultCode::CANCELED, common_resultcode_);
+  EXPECT_EQ(
+    control_msgs::action::FollowJointTrajectory_Result::SUCCESSFUL, common_action_result_code_);
+
+  std::vector<double> cancelled_position{joint_pos_[0], joint_pos_[1], joint_pos_[2]};
+
+  // We always expect a trivial trajectory because we fell back to set_hold_position
+  // i.e., active but trivial trajectory (one point only)
+  expectCommandPoint(cancelled_position);
+}
+
 TEST_P(TestTrajectoryActionsTestParameterized, test_allow_nonzero_velocity_at_trajectory_end_true)
 {
   std::vector<rclcpp::Parameter> params = {
     rclcpp::Parameter("allow_nonzero_velocity_at_trajectory_end", true),
-    rclcpp::Parameter("constraints.stopped_velocity_tolerance", 0.0),
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 20.0)};
+    rclcpp::Parameter("constraints.stopped_velocity_tolerance", 0.0)};
   SetUpExecutor(params);
   SetUpControllerHardware();
 
@@ -1198,14 +1277,9 @@ TEST_P(TestTrajectoryActionsTestScalingFactor, test_scaling_execution_time_succe
     rclcpp::Parameter("constraints.joint3.goal", goal_tol),
     // the test hw does not report velocity, so this constraint will not do anything
     rclcpp::Parameter("constraints.stopped_velocity_tolerance", 0.01),
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 20.0)
   };
   SetUpExecutor({params}, false, 1.0, 0.0);
   SetUpControllerHardware();
-  SubscribeToState();
 
   // defining points and times
   std::vector<double> points_times{0.1, 0.2};
@@ -1226,10 +1300,9 @@ TEST_P(TestTrajectoryActionsTestScalingFactor, test_scaling_execution_time_succe
 
     // Since we are summing up scaled periods, the scale of the period sum will not be the same
     // due to numerical errors.
-    auto state = getState();
     EXPECT_NEAR(
       time_diff_sec(feedback_msg->desired.time_from_start),
-      time_diff_sec(feedback_msg->actual.time_from_start) * state->speed_scaling_factor,
+      time_diff_sec(feedback_msg->actual.time_from_start) * scaling_factor,
       1e-3 * time_diff_sec(feedback_msg->actual.time_from_start));
   };
 
@@ -1284,14 +1357,9 @@ TEST_P(TestTrajectoryActionsTestScalingFactor, test_scaling_sampling_is_correct)
     rclcpp::Parameter("constraints.joint2.goal", 1e-3),
     rclcpp::Parameter("constraints.joint3.goal", 1e-3),
     rclcpp::Parameter("constraints.goal_time", 0.1),
-        rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 20.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 20.0)
   };
   SetUpExecutor(params, true, 1.0, 0.0);
   // SetUpControllerHardware();
-  SubscribeToState();
 
   std::vector<std::vector<double>> points_positions{{{4.0, 5.0, 6.0}}, {{7.0, 8.0, 9.0}}};
   std::vector<JointTrajectoryPoint> points;
@@ -1340,9 +1408,7 @@ TEST_P(TestTrajectoryActionsTestScalingFactor, test_scaling_sampling_is_correct)
     traj_controller_->update(sample_time, controller_period);
     for (size_t i = 0; i < joint_state_pos_.size(); ++i)
     {
-      auto state = getState();
-      auto _scaling_factor = state ? state->speed_scaling_factor : scaling_factor;
-      joint_state_pos_[i] += (joint_pos_[i] - joint_state_pos_[i]) * _scaling_factor;
+      joint_state_pos_[i] += (joint_pos_[i] - joint_state_pos_[i]) * scaling_factor;
     }
     trajectory_msgs::msg::JointTrajectoryPoint sampled_point;
     joint_trajectory_controller::TrajectoryPointConstIter start_segment_itr, end_segment_itr;
@@ -1360,4 +1426,4 @@ TEST_P(TestTrajectoryActionsTestScalingFactor, test_scaling_sampling_is_correct)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-  ScaledJTCTests, TestTrajectoryActionsTestScalingFactor, ::testing::Values(0.25, 0.87, 1.0));
+  ScaledJTCTests, TestTrajectoryActionsTestScalingFactor, ::testing::Values(0.25, 0.87, 1.0, 2.0));

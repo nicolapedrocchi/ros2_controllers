@@ -1486,14 +1486,7 @@ TEST_P(TrajectoryControllerTestParameterized, velocity_error)
 TEST_P(TrajectoryControllerTestParameterized, test_jumbled_joint_order)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
-    std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
-  };
-  SetUpAndActivateTrajectoryController(executor, params);
-
+  SetUpAndActivateTrajectoryController(executor);
   std::vector<double> points_positions = {1.0, 2.0, 3.0};
   std::vector<double> points_effort = {4.0, 5.0, 6.0};
   std::vector<size_t> jumble_map = {1, 2, 0};
@@ -1584,16 +1577,10 @@ TEST_P(TrajectoryControllerTestParameterized, test_jumbled_joint_order)
  */
 TEST_P(TrajectoryControllerTestParameterized, test_partial_joint_list)
 {
-  std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("allow_partial_joints_goal", true), 
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
-  };
+  rclcpp::Parameter partial_joints_parameters("allow_partial_joints_goal", true);
 
   rclcpp::executors::SingleThreadedExecutor executor;
-  SetUpAndActivateTrajectoryController(executor, params);
+  SetUpAndActivateTrajectoryController(executor, {partial_joints_parameters});
 
   const double initial_joint1_cmd = joint_pos_[0];
   const double initial_joint2_cmd = joint_pos_[1];
@@ -1631,8 +1618,7 @@ TEST_P(TrajectoryControllerTestParameterized, test_partial_joint_list)
 
   if (traj_controller_->has_position_command_interface())
   {
-    EXPECT_NEAR(traj_msg.points[0].positions[1], joint_pos_[0], COMMON_THRESHOLD) 
-      << "Velocities are " << traj_msg.points[0].velocities[0] << " and " << traj_msg.points[0].velocities[1];
+    EXPECT_NEAR(traj_msg.points[0].positions[1], joint_pos_[0], COMMON_THRESHOLD);
     EXPECT_NEAR(traj_msg.points[0].positions[0], joint_pos_[1], COMMON_THRESHOLD);
     EXPECT_NEAR(initial_joint3_cmd, joint_pos_[2], COMMON_THRESHOLD)
       << "Joint 3 command should be current position";
@@ -1961,15 +1947,8 @@ TEST_P(TrajectoryControllerTestParameterized, missing_positions_message_accepted
 TEST_P(TrajectoryControllerTestParameterized, test_trajectory_replace)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
-   std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("allow_partial_joints_goal", true), 
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
-  };
-
-  SetUpAndActivateTrajectoryController(executor, params);
+  rclcpp::Parameter partial_joints_parameters("allow_partial_joints_goal", true);
+  SetUpAndActivateTrajectoryController(executor, {partial_joints_parameters});
 
   std::vector<std::vector<double>> points_old{{{2., 3., 4.}}};
   std::vector<std::vector<double>> points_old_velocities{{{0.2, 0.3, 0.4}}};
@@ -2141,16 +2120,9 @@ TEST_P(TrajectoryControllerTestParameterized, test_execute_partial_traj_in_futur
 TEST_P(TrajectoryControllerTestParameterized, test_jump_when_state_tracking_error_updated)
 {
   rclcpp::executors::SingleThreadedExecutor executor;
-  std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("interpolate_from_desired_state", false), 
-    rclcpp::Parameter("limits.override_urdf", true),
-    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
-  };
-
   // default is false so it will not be actually set parameter
-  SetUpAndActivateTrajectoryController(executor, params, true);
+  rclcpp::Parameter interp_desired_state_parameter("interpolate_from_desired_state", false);
+  SetUpAndActivateTrajectoryController(executor, {interp_desired_state_parameter}, true);
 
   if (traj_controller_->has_position_command_interface() == false)
   {
@@ -2713,27 +2685,26 @@ TEST_F(TrajectoryControllerTest, setting_scaling_factor_works_correctly)
     controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
 
-  updateController(rclcpp::Duration::from_seconds(0.01));
-
   control_msgs::msg::SpeedScalingFactor msg;
   msg.factor = 0.765;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
 
-  updateController(rclcpp::Duration::from_seconds(3.0));
+  updateController();
+
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, 0.765, EPS);
+  EXPECT_EQ(state->speed_scaling_factor, 0.765);
 
   // 0.0 should work as an edge case
   msg.factor = 0.0;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
-  updateController(rclcpp::Duration::from_seconds(3.0));
+  updateController();
   executor.spin_some();
   state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, 0.0, EPS);
+  EXPECT_EQ(state->speed_scaling_factor, 0.0);
 
   // Sending a negative value will be ignored
   msg.factor = 0.45;
@@ -2742,31 +2713,26 @@ TEST_F(TrajectoryControllerTest, setting_scaling_factor_works_correctly)
   msg.factor = -0.12;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
-  updateController(rclcpp::Duration::from_seconds(3.0));
+  updateController();
   executor.spin_some();
   state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, 0.45, EPS);
+  EXPECT_EQ(state->speed_scaling_factor, 0.45);
 }
 
 TEST_F(TrajectoryControllerTest, scaling_factor_from_param)
 {
   double initial_factor = 0.123;
-  double filter_coefficient = 0.05;
   rclcpp::executors::MultiThreadedExecutor executor;
   std::vector<rclcpp::Parameter> params = {
     rclcpp::Parameter("speed_scaling.initial_scaling_factor", initial_factor),
-    rclcpp::Parameter("speed_scaling.filter_coefficient", filter_coefficient),
-    rclcpp::Parameter("limits.joint1.max_velocity", 0.3),
-    rclcpp::Parameter("limits.joint2.max_velocity", 0.3),
-    rclcpp::Parameter("limits.joint3.max_velocity", 0.3),
   };
   SetUpAndActivateTrajectoryController(executor, params);
   subscribeToState(executor);
-  updateController(rclcpp::Duration::from_seconds(0.01));  // an exponential moving average is used
+  updateController();
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, initial_factor, EPS);
+  EXPECT_EQ(state->speed_scaling_factor, initial_factor);
 }
 
 TEST_F(
@@ -2807,10 +2773,10 @@ TEST_F(
 
 TEST_F(TrajectoryControllerTest, scaling_state_interface_sets_value)
 {
-  double filter_coefficient = 0.1;
+  double initial_factor = 0.123;
   rclcpp::executors::MultiThreadedExecutor executor;
   std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("speed_scaling.filter_coefficient", filter_coefficient),
+    rclcpp::Parameter("speed_scaling.initial_scaling_factor", initial_factor),
     rclcpp::Parameter("speed_scaling.state_interface", "speed_scaling/speed_scaling_factor"),
   };
   SetUpAndActivateTrajectoryController(executor, params);
@@ -2820,84 +2786,34 @@ TEST_F(TrajectoryControllerTest, scaling_state_interface_sets_value)
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
     controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
-  updateController(rclcpp::Duration::from_seconds(0.01));  // an exponential moving average is used
+  updateController();
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, speed_scaling_factor_,1e-4);
+  EXPECT_EQ(state->speed_scaling_factor, speed_scaling_factor_);
 
   control_msgs::msg::SpeedScalingFactor msg;
   msg.factor = 0.765;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
 
-  updateController(rclcpp::Duration::from_seconds(.01));  // an exponential moving average is used
-
-  // Spin to receive latest state
-  executor.spin_some();
-  state = getState();
-  // Since we have a speed scaling state interface active, the value set via topic will be
-  // overwritten from the state interface. The value should not have changed much bbeacuse of the exponential filter
-  EXPECT_GE(std::fabs(state->speed_scaling_factor - msg.factor),1e-2);
-
-  updateController(rclcpp::Duration::from_seconds(1.0));  // an exponential moving average is used
+  updateController();
 
   // Spin to receive latest state
   executor.spin_some();
   state = getState();
   // Since we have a speed scaling state interface active, the value set via topic will be
   // overwritten from the state interface.
-  EXPECT_NEAR(state->speed_scaling_factor, msg.factor,1e-4);
+  EXPECT_EQ(state->speed_scaling_factor, speed_scaling_factor_);
 }
 
-TEST_F(TrajectoryControllerTest, scaling_interface_from_topic)
-{
-  double filter_coefficient = 0.9;
-  rclcpp::executors::MultiThreadedExecutor executor;
-  std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("speed_scaling.filter_coefficient", filter_coefficient),
-    rclcpp::Parameter("speed_scaling.state_interface", "speed_scaling/speed_scaling_factor"),
-  };
-  SetUpAndActivateTrajectoryController(executor, params);
-
-  auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
-    controller_name_ + "/speed_scaling_input", rclcpp::SystemDefaultsQoS().transient_local());
-  subscribeToState(executor);
-  updateController(rclcpp::Duration::from_seconds(0.01));  // an exponential moving average is used
-  // Spin to receive latest state
-  executor.spin_some();
-  auto state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor, speed_scaling_factor_,1e-4);
-
-  control_msgs::msg::SpeedScalingFactor msg;
-  msg.factor = 0.765;
-  speed_scaling_pub->publish(msg);
-  traj_controller_->wait_for_trajectory(executor);
-
-  updateController(rclcpp::Duration::from_seconds(.01));  // an exponential moving average is used
-
-  // Spin to receive latest state
-  executor.spin_some();
-  state = getState();
-  // Since we have a speed scaling state interface active, the value set via topic will be
-  // overwritten from the state interface. The value should not have changed much bbeacuse of the exponential filter
-  EXPECT_GE(std::fabs(state->speed_scaling_factor - msg.factor),1e-3);
-
-  updateController(rclcpp::Duration::from_seconds(1.0));  // an exponential moving average is used
-
-  // Spin to receive latest state
-  executor.spin_some();
-  state = getState();
-  // Since we have a speed scaling state interface active, the value set via topic will be
-  // overwritten from the state interface.
-  EXPECT_NEAR(state->speed_scaling_factor, msg.factor,1e-4);
-}
 TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
 {
   double initial_factor = 0.123;
   rclcpp::executors::MultiThreadedExecutor executor;
   std::vector<rclcpp::Parameter> params = {
     rclcpp::Parameter("speed_scaling.initial_scaling_factor", initial_factor),
+    rclcpp::Parameter("speed_scaling.state_interface", "speed_scaling/speed_scaling_factor"),
     rclcpp::Parameter("speed_scaling.command_interface", "speed_scaling/target_speed_fraction_cmd"),
   };
   SetUpAndActivateTrajectoryController(executor, params);
@@ -2907,27 +2823,26 @@ TEST_F(TrajectoryControllerTest, scaling_command_interface_sets_value)
   auto speed_scaling_pub = node_->create_publisher<control_msgs::msg::SpeedScalingFactor>(
     controller_name_ + "/speed_scaling_input", qos);
   subscribeToState(executor);
-  updateController(rclcpp::Duration::from_seconds(.01));
+  updateController();
   // Spin to receive latest state
   executor.spin_some();
   auto state = getState();
   // The initial value should be written to the hardware
-  EXPECT_NEAR(state->speed_scaling_factor, initial_factor, 1e-4);
+  EXPECT_EQ(state->speed_scaling_factor, initial_factor);
 
   control_msgs::msg::SpeedScalingFactor msg;
   msg.factor = 0.765;
   speed_scaling_pub->publish(msg);
   traj_controller_->wait_for_trajectory(executor);
-  // Spin to receive latest state
-  executor.spin_some();
-  state = getState();
+
   // Value will be set during the first update and read in the second update
-  updateController(rclcpp::Duration::from_seconds(5.0));
+  updateController();
+  updateController();
 
   // Spin to receive latest state
   executor.spin_some();
   state = getState();
-  EXPECT_NEAR(state->speed_scaling_factor,0.765,1e-4);
+  EXPECT_EQ(state->speed_scaling_factor, 0.765);
 }
 
 TEST_F(TrajectoryControllerTest, activate_with_scaling_interfaces)
@@ -2956,101 +2871,337 @@ TEST_F(TrajectoryControllerTest, activate_with_scaling_interfaces)
   executor.cancel();
 }
 
+// ===========================================================================
+// Tests for decelerate_to_hold_position
+// ===========================================================================
 
 /**
- * @brief check the managments of the limits
+ * @brief When no velocity state interface is configured, decelerate_to_hold_position
+ * must fall back to set_hold_position, producing a trivial (single-point) trajectory.
+ *
+ * The function explicitly checks has_velocity_state_interface_ and calls
+ * set_hold_position() when it is false.
  */
-TEST_F(TrajectoryControllerTest, limits_from_urdf)
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_fallback_no_velocity_state)
 {
-  rclcpp::executors::MultiThreadedExecutor executor;
-  std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("speed_scaling.state_interface", "speed_scaling/speed_scaling_factor"),
-    rclcpp::Parameter("speed_scaling.command_interface", "speed_scaling/target_speed_fraction_cmd"),
-  };
-  SetUpTrajectoryController(executor, params, test_trajectory_controllers::urdf_rrrbot_continuous);
+  // Remove velocity from state interfaces so has_velocity_state_interface_ == false
+  state_interface_types_ = {"position"};
 
-  auto state = traj_controller_->configure();
-  auto max_velocities = traj_controller_->get_max_velocities();
-  auto max_accelerations = traj_controller_->get_max_accelerations();
-  ASSERT_TRUE(max_velocities.find("joint1")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint2")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint3")!=max_velocities.end());
-  ASSERT_TRUE(max_accelerations.find("joint1")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint2")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint3")!=max_accelerations.end());
-  ASSERT_EQ(max_velocities["joint1"],2);
-  ASSERT_EQ(max_velocities["joint2"],2);
-  ASSERT_EQ(max_velocities["joint3"],2);
-  ASSERT_EQ(max_accelerations["joint1"],std::numeric_limits<double>::infinity());
-  ASSERT_EQ(max_accelerations["joint2"],std::numeric_limits<double>::infinity());
-  ASSERT_EQ(max_accelerations["joint3"],std::numeric_limits<double>::infinity());
-  executor.cancel();
-}
-
-/**
- * @brief check the managments of the limits
- */
-TEST_F(TrajectoryControllerTest, limits_from_urdf_gt_param)
-{
   rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
   std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("limits.joint1.max_velocity", 0.1),
-    rclcpp::Parameter("limits.joint2.max_velocity", 0.01),
-    rclcpp::Parameter("limits.joint3.max_velocity", 0.05),
-    rclcpp::Parameter("limits.joint1.max_acceleration", 1.0),
-    rclcpp::Parameter("limits.joint2.max_acceleration", .1),
-    rclcpp::Parameter("limits.joint3.max_acceleration", .5),
-  };
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", 10.0),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
   SetUpAndActivateTrajectoryController(executor, params);
 
-  auto state = traj_controller_->configure();
-  auto max_velocities = traj_controller_->get_max_velocities();
-  auto max_accelerations = traj_controller_->get_max_accelerations();
-  ASSERT_TRUE(max_velocities.find("joint1")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint2")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint3")!=max_velocities.end());
-  ASSERT_TRUE(max_accelerations.find("joint1")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint2")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint3")!=max_accelerations.end());
-  ASSERT_EQ(max_velocities["joint1"],0.1);
-  ASSERT_EQ(max_velocities["joint2"],0.01);
-  ASSERT_EQ(max_velocities["joint3"],0.05);
-  ASSERT_EQ(max_accelerations["joint1"],1.0);
-  ASSERT_EQ(max_accelerations["joint2"],0.1);
-  ASSERT_EQ(max_accelerations["joint3"],0.5);
+  ASSERT_FALSE(traj_controller_->has_velocity_state_interface());
+
+  // Publish a trajectory to exit the initial holding state (rt_is_holding_ = true on activate)
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  // Run until trajectory ends, then until cmd_timeout fires
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  // Without velocity state, must fall back to set_hold_position -> trivial trajectory
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_trivial_traj());
+  expectCommandPoint(INITIAL_POS_JOINTS);
+
   executor.cancel();
 }
 
 /**
- * @brief check the managments of the limits
+ * @brief When max_deceleration_on_cancel is 0.0 (the default) for any joint, the
+ * controller disables should_decelerate_on_cancel_ internally during configure and falls back
+ * to set_hold_position on timeout.
  */
-TEST_F(TrajectoryControllerTest, limits_from_urdf_lt_param)
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_fallback_zero_max_decel)
 {
   rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
+  // decelerate_on_cancel = true but no max_deceleration_on_cancel set (defaults to 0.0)
+  // -> controller disables should_decelerate_on_cancel_ and falls back to set_hold_position
   std::vector<rclcpp::Parameter> params = {
-    rclcpp::Parameter("limits.joint1.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint2.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint3.max_velocity", 3.0),
-    rclcpp::Parameter("limits.joint1.max_acceleration", 1.0),
-    rclcpp::Parameter("limits.joint2.max_acceleration", .1),
-    rclcpp::Parameter("limits.joint3.max_acceleration", .5),
-  };
-  SetUpTrajectoryController(executor, params, test_trajectory_controllers::urdf_rrrbot_continuous);
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
 
-  auto state = traj_controller_->configure();
-  auto max_velocities = traj_controller_->get_max_velocities();
-  auto max_accelerations = traj_controller_->get_max_accelerations();
-  ASSERT_TRUE(max_velocities.find("joint1")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint2")!=max_velocities.end());
-  ASSERT_TRUE(max_velocities.find("joint3")!=max_velocities.end());
-  ASSERT_TRUE(max_accelerations.find("joint1")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint2")!=max_accelerations.end());
-  ASSERT_TRUE(max_accelerations.find("joint3")!=max_accelerations.end());
-  ASSERT_EQ(max_velocities["joint1"],2);
-  ASSERT_EQ(max_velocities["joint2"],2);
-  ASSERT_EQ(max_velocities["joint3"],2);
-  ASSERT_EQ(max_accelerations["joint1"],1.0);
-  ASSERT_EQ(max_accelerations["joint2"],0.1);
-  ASSERT_EQ(max_accelerations["joint3"],0.5);
+  SetUpAndActivateTrajectoryController(executor, params);
+
+  ASSERT_TRUE(traj_controller_->has_velocity_state_interface());
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  // Zero max_decel disables the feature; should produce a trivial hold trajectory
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_trivial_traj());
+  expectCommandPoint(INITIAL_POS_JOINTS);
+
+  executor.cancel();
+}
+
+/**
+ * @brief With positive joint velocities, decelerate_to_hold_position should create a
+ * non-trivial multi-point trajectory and command the analytically-computed hold position:
+ *   hold_pos = p0 + v0^2 / (2 * max_decel)
+ *
+ * With position-only command interface the velocity state (joint_vel_) is initialised
+ * to initial_vel_joints and not overwritten during trajectory execution, so the
+ * function sees a constant nonzero v0 when the timeout fires.
+ */
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_positive_velocity)
+{
+  rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
+  constexpr double max_decel = 10.0;
+  // Use the URDF velocity limit (0.2 rad/s) to stay within the pre-allocated stop
+  // trajectory size and avoid a resize warning during the test
+  const std::vector<double> initial_vel = {0.2, 0.2, 0.2};
+
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
+  // separate_cmd_and_state_values=false: joint_vel_ backs both the velocity command
+  // interface (unused here) and the velocity state interface.  With a position-only
+  // command interface the controller never writes to joint_vel_, so the velocity
+  // state remains at initial_vel throughout the test.
+  SetUpAndActivateTrajectoryController(
+    executor, params, false, 0.0, 1.0, INITIAL_POS_JOINTS, initial_vel);
+
+  ASSERT_TRUE(traj_controller_->has_velocity_state_interface());
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  // Target the current position so joint_pos_ stays at INITIAL_POS_JOINTS
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  // Run trajectory to completion then wait for cmd_timeout to fire
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  // Timeout fired: decelerate_to_hold_position should have installed a non-trivial trajectory
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_nontrivial_traj());
+
+  // Execute the deceleration trajectory (max stop time = 0.2 / 10.0 = 0.02 s)
+  updateController(rclcpp::Duration::from_seconds(0.1));
+
+  // Analytical hold position: p0 + v0^2 / (2 * max_decel)
+  const double stop_dist = (initial_vel[0] * initial_vel[0]) / (2.0 * max_decel);
+  const std::vector<double> expected_hold = {
+    INITIAL_POS_JOINTS[0] + stop_dist, INITIAL_POS_JOINTS[1] + stop_dist,
+    INITIAL_POS_JOINTS[2] + stop_dist};
+
+  // expect_trivial_traj=false: stop_trajectory_ has multiple points and stays active
+  expectCommandPoint(expected_hold, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, false);
+
+  executor.cancel();
+}
+
+/**
+ * @brief With negative joint velocities, decelerate_to_hold_position should produce a
+ * non-trivial trajectory and command a hold position that is below p0:
+ *   hold_pos = p0 - v0^2 / (2 * max_decel)
+ */
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_negative_velocity)
+{
+  rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
+  constexpr double max_decel = 10.0;
+  const std::vector<double> initial_vel = {-0.2, -0.2, -0.2};
+
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
+  SetUpAndActivateTrajectoryController(
+    executor, params, false, 0.0, 1.0, INITIAL_POS_JOINTS, initial_vel);
+
+  ASSERT_TRUE(traj_controller_->has_velocity_state_interface());
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_nontrivial_traj());
+
+  updateController(rclcpp::Duration::from_seconds(0.1));
+
+  // Negative velocity: stop direction is -1.0, so hold_pos = p0 - v0^2 / (2 * max_decel)
+  const double stop_dist = (initial_vel[0] * initial_vel[0]) / (2.0 * max_decel);
+  const std::vector<double> expected_hold = {
+    INITIAL_POS_JOINTS[0] - stop_dist, INITIAL_POS_JOINTS[1] - stop_dist,
+    INITIAL_POS_JOINTS[2] - stop_dist};
+
+  expectCommandPoint(expected_hold, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, false);
+
+  executor.cancel();
+}
+
+/**
+ * @brief Each joint should decelerate independently based on its own initial velocity.
+ * With asymmetric per-joint velocities the hold positions follow:
+ *   hold_pos_i = p0_i + sign(v0_i) * v0_i^2 / (2 * max_decel)
+ *
+ * A joint with zero velocity should remain at its initial position.
+ */
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_per_joint_calculation)
+{
+  rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
+  constexpr double max_decel = 10.0;
+  // joint1 moves forward, joint2 moves backward, joint3 is stationary
+  const std::vector<double> initial_vel = {0.2, -0.1, 0.0};
+
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
+  SetUpAndActivateTrajectoryController(
+    executor, params, false, 0.0, 1.0, INITIAL_POS_JOINTS, initial_vel);
+
+  ASSERT_TRUE(traj_controller_->has_velocity_state_interface());
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_nontrivial_traj());
+
+  updateController(rclcpp::Duration::from_seconds(0.1));
+
+  // Compute per-joint expected hold positions analytically
+  std::vector<double> expected_hold(3);
+  for (size_t i = 0; i < 3; ++i)
+  {
+    const double direction = (initial_vel[i] >= 0.0) ? 1.0 : -1.0;
+    const double stop_dist = (initial_vel[i] * initial_vel[i]) / (2.0 * max_decel);
+    expected_hold[i] = INITIAL_POS_JOINTS[i] + direction * stop_dist;
+  }
+
+  // Sanity check: joint3 had zero velocity so its hold position equals the initial
+  EXPECT_NEAR(INITIAL_POS_JOINTS[2], expected_hold[2], EPS);
+
+  expectCommandPoint(expected_hold, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, false);
+
+  executor.cancel();
+}
+
+/**
+ * @brief With a position+velocity command interface, verify that velocity commands
+ * are ramped to zero during deceleration and that the position command reaches the
+ * analytical hold position.
+ *
+ * separate_cmd_and_state_values=true decouples the velocity state interface
+ * (joint_state_vel_) from the velocity command output (joint_vel_), so a stable
+ * nonzero v0 is presented to the function regardless of what the controller wrote
+ * during the preceding trajectory.
+ */
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_velocity_command_ramps_to_zero)
+{
+  command_interface_types_ = {"position", "velocity"};
+
+  rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double cmd_timeout = 0.1;
+  constexpr double max_decel = 10.0;
+  const std::vector<double> initial_vel = {0.2, 0.2, 0.2};
+
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("cmd_timeout", cmd_timeout),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
+  // separate_cmd_and_state_values=true: position/velocity commands write to joint_pos_/
+  // joint_vel_; state interfaces read from joint_state_pos_/joint_state_vel_.
+  // ActivateTrajectoryController initialises joint_state_vel_ to INITIAL_VEL_JOINTS (0.0),
+  // so we set it manually to initial_vel after activation.
+  SetUpAndActivateTrajectoryController(
+    executor, params, true, 0.0, 1.0, INITIAL_POS_JOINTS, initial_vel);
+
+  ASSERT_TRUE(traj_controller_->has_velocity_state_interface());
+  ASSERT_TRUE(traj_controller_->has_velocity_command_interface());
+
+  // Present a nonzero velocity state so decelerate_to_hold_position sees v0 != 0
+  joint_state_vel_[0] = initial_vel[0];
+  joint_state_vel_[1] = initial_vel[1];
+  joint_state_vel_[2] = initial_vel[2];
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(250);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  // joint_state_pos_ stays at INITIAL_POS_JOINTS (separate state is not updated by
+  // position commands), so targeting INITIAL_POS_JOINTS requires zero commanded movement
+  std::vector<std::vector<double>> points{{INITIAL_POS_JOINTS}};
+  publish(time_from_start, points, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  updateController(rclcpp::Duration(FIRST_POINT_TIME));
+  updateController(rclcpp::Duration::from_seconds(cmd_timeout + 0.05));
+
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_nontrivial_traj());
+
+  // Execute the deceleration trajectory (stop time = 0.2 / 10.0 = 0.02 s)
+  updateController(rclcpp::Duration::from_seconds(0.1));
+
+  // Velocity commands (joint_vel_) must have been driven to zero
+  EXPECT_NEAR(0.0, joint_vel_[0], COMMON_THRESHOLD);
+  EXPECT_NEAR(0.0, joint_vel_[1], COMMON_THRESHOLD);
+  EXPECT_NEAR(0.0, joint_vel_[2], COMMON_THRESHOLD);
+
+  // Position commands (joint_pos_) must equal the analytical hold position.
+  // p0 = joint_state_pos_ = INITIAL_POS_JOINTS (unchanged by separate-mode commands)
+  const double stop_dist = (initial_vel[0] * initial_vel[0]) / (2.0 * max_decel);
+  const std::vector<double> expected_hold = {
+    INITIAL_POS_JOINTS[0] + stop_dist, INITIAL_POS_JOINTS[1] + stop_dist,
+    INITIAL_POS_JOINTS[2] + stop_dist};
+
+  if (traj_controller_->has_position_command_interface())
+  {
+    EXPECT_NEAR(expected_hold[0], joint_pos_[0], COMMON_THRESHOLD);
+    EXPECT_NEAR(expected_hold[1], joint_pos_[1], COMMON_THRESHOLD);
+    EXPECT_NEAR(expected_hold[2], joint_pos_[2], COMMON_THRESHOLD);
+  }
+
   executor.cancel();
 }
