@@ -78,13 +78,11 @@ public:
   void SetUp() override
   {
     controller_ = std::make_unique<CtrlType>();
-    controller_interface::ControllerInterfaceParams params;
-    params.controller_name = "test_motion_primitives_forward_controller";
-    params.robot_description = "";
-    params.update_rate = 0;
-    params.node_namespace = "";
-    params.node_options = controller_->define_custom_node_options();
-    ASSERT_EQ(controller_->init(params), controller_interface::return_type::OK);
+    ASSERT_EQ(
+      controller_->init(
+        "test_motion_primitives_forward_controller", "", 0, "",
+        controller_->define_custom_node_options()),
+      controller_interface::return_type::OK);
 
     node_ = std::make_shared<rclcpp::Node>("test_node");
 
@@ -115,34 +113,34 @@ public:
 protected:
   void SetUpController()
   {
-    std::vector<hardware_interface::LoanedCommandInterface> loaned_command_ifs;
-    std::vector<hardware_interface::LoanedStateInterface> loaned_state_ifs;
+    std::vector<hardware_interface::LoanedCommandInterface> command_ifs;
+    std::vector<hardware_interface::LoanedStateInterface> state_ifs;
 
     command_itfs_.clear();
     command_itfs_.reserve(command_values_.size());
-    loaned_command_ifs.reserve(command_values_.size());
+    command_ifs.reserve(command_values_.size());
 
     for (size_t i = 0; i < command_values_.size(); ++i)
     {
       command_itfs_.emplace_back(
-        std::make_shared<hardware_interface::CommandInterface>(
+        hardware_interface::CommandInterface(
           interface_namespace_, command_interface_names_[i], &command_values_[i]));
-      loaned_command_ifs.emplace_back(command_itfs_.back(), nullptr);
+      command_ifs.emplace_back(command_itfs_.back());
     }
 
     state_itfs_.clear();
     state_itfs_.reserve(state_values_.size());
-    loaned_state_ifs.reserve(state_values_.size());
+    state_ifs.reserve(state_values_.size());
 
     for (size_t i = 0; i < state_values_.size(); ++i)
     {
       state_itfs_.emplace_back(
-        std::make_shared<hardware_interface::StateInterface>(
+        hardware_interface::StateInterface(
           interface_namespace_, state_interface_names_[i], &state_values_[i]));
-      loaned_state_ifs.emplace_back(state_itfs_.back(), nullptr);
+      state_ifs.emplace_back(state_itfs_.back());
     }
 
-    controller_->assign_interfaces(std::move(loaned_command_ifs), std::move(loaned_state_ifs));
+    controller_->assign_interfaces(std::move(command_ifs), std::move(state_ifs));
   }
 
   void send_single_motion_sequence_goal(
@@ -207,8 +205,8 @@ protected:
      101.101, 101.101, 101.101, 101.101, 101.101, 101.101, 101.101, 101.101, 101.101,
      101.101, 101.101, 101.101, 101.101, 101.101, 101.101, 101.101}};
 
-  std::vector<hardware_interface::StateInterface::SharedPtr> state_itfs_;
-  std::vector<hardware_interface::CommandInterface::SharedPtr> command_itfs_;
+  std::vector<hardware_interface::StateInterface> state_itfs_;
+  std::vector<hardware_interface::CommandInterface> command_itfs_;
 
   std::unique_ptr<TestableMotionPrimitivesForwardController> controller_;
   rclcpp_action::Client<ExecuteMotion>::SharedPtr action_client_;

@@ -1,0 +1,4 @@
+COLCON_IGNORE
+*.bkp
+*~
+__pycache__/

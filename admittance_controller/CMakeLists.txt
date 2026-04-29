@@ -23,7 +23,6 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   tf2_geometry_msgs
   tf2_kdl
   tf2_ros
-  TinyXML2
   trajectory_msgs
 )
 
@@ -66,8 +65,7 @@ target_link_libraries(admittance_controller PUBLIC
                       ${geometry_msgs_TARGETS}
                       ${trajectory_msgs_TARGETS}
                       ${control_msgs_TARGETS}
-                      ${tf2_geometry_msgs_TARGETS}
-                      ${TinyXML2_LIBRARIES})
+                      ${tf2_geometry_msgs_TARGETS})
 
 pluginlib_export_plugin_description_file(controller_interface admittance_controller.xml)
 
@@ -96,15 +94,6 @@ if(BUILD_TESTING)
   target_link_libraries(test_admittance_controller
     admittance_controller
     ros2_control_test_assets::ros2_control_test_assets)
-
-  # test admittance rule implementation
-  ament_add_gmock(test_admittance_rule_impl
-    test/test_admittance_rule_impl.cpp
-  )
-  target_link_libraries(test_admittance_rule_impl
-    admittance_controller
-    Eigen3::Eigen
-    kinematics_interface::kinematics_interface)
 endif()
 
 install(

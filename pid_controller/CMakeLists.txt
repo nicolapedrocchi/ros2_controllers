@@ -22,6 +22,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   controller_interface
   generate_parameter_library
   hardware_interface
+  parameter_traits
   pluginlib
   rclcpp
   rclcpp_lifecycle
@@ -59,6 +60,7 @@ target_link_libraries(pid_controller PUBLIC
                       realtime_tools::realtime_tools
                       ${std_srvs_TARGETS}
                       ${control_msgs_TARGETS}
+                      ${parameter_traits_TARGETS}
                       ${std_srvs_TARGETS})
 
 pluginlib_export_plugin_description_file(controller_interface pid_controller.xml)
