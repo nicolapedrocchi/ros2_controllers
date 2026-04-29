@@ -642,6 +642,32 @@ controller_interface::return_type JointTrajectoryController::update(
     {
       trajectory_scaling_.feasible_factor_ = trajectory_scaling_.filtered_factor_;
     }
+    
+    // set values for next hardware write()
+    if (has_position_command_interface_)
+    {
+      assign_interface_from_point(joint_command_interface_[0], last_commanded_state_.positions);
+    }
+    if (has_velocity_command_interface_)
+    {
+      for(auto & v : last_commanded_state_.velocities)
+      {
+        v = 0.0;
+      }
+      assign_interface_from_point(joint_command_interface_[1], last_commanded_state_.velocities);
+    }
+    if (has_acceleration_command_interface_)
+    {
+      for(auto & a : last_commanded_state_.accelerations)
+      {
+        a = 0.0;
+      }
+      assign_interface_from_point(joint_command_interface_[2], last_commanded_state_.accelerations);
+    }
+    if (has_effort_command_interface_)
+    {
+      assign_interface_from_point(joint_command_interface_[3], state_desired_.effort);
+    }
   }
 
   publish_state(time, state_desired_, state_current_, state_error_);
