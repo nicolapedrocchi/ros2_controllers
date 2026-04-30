@@ -14,6 +14,7 @@
 
 #include "joint_trajectory_controller/joint_trajectory_controller.hpp"
 
+#include <cmath>
 #include <limits>
 #include <rcl/time.h>
 #include <joint_limits/joint_limits.hpp>
@@ -185,7 +186,6 @@ controller_interface::CallbackReturn JointTrajectoryController::on_init()
       stop_trajectory_->points.resize(num_points, pt);
     }
   }
-
   return CallbackReturn::SUCCESS;
 }
 
@@ -355,7 +355,7 @@ controller_interface::return_type JointTrajectoryController::update(
       trajectory_utils::apply_scaling_factor(trajectory_scaling_.feasible_factor_, trajectory_scaling_feasible_derivative,state_desired_);
     }
 
-    const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
+    //const auto next_point_index = std::distance(current_trajectory_->begin(), end_segment_itr);
 
     // Sample setpoint for next control cycle
     bool valid_point;
@@ -476,32 +476,39 @@ controller_interface::return_type JointTrajectoryController::update(
         if (has_position_command_interface_)
         {
           assign_interface_from_point(joint_command_interface_[0], command_next_.positions);
+          log(0, command_next_.positions);
         }
         if (has_velocity_command_interface_)
         {
           if (use_closed_loop_pid_adapter_)
           {
             assign_interface_from_point(joint_command_interface_[1], tmp_command_);
+            log(1, tmp_command_);
           }
           else
           {
             assign_interface_from_point(joint_command_interface_[1], command_next_.velocities);
+            log(1, command_next_.velocities);
           }
+          
         }
         if (has_acceleration_command_interface_)
         {
           assign_interface_from_point(joint_command_interface_[2], command_next_.accelerations);
+          log(2, command_next_.accelerations);
         }
         if (has_effort_command_interface_)
         {
           if (use_closed_loop_pid_adapter_)
           {
             assign_interface_from_point(joint_command_interface_[3], tmp_command_);
+            log(3, tmp_command_);
           }
           else
           {
             // If position and effort command interfaces, only pass desired effort
             assign_interface_from_point(joint_command_interface_[3], state_desired_.effort);
+            log(3, state_desired_.effort);
           }
         }
 
@@ -520,7 +527,7 @@ controller_interface::return_type JointTrajectoryController::update(
         feedback->actual = state_current_;
         feedback->desired = state_desired_;
         feedback->error = state_error_;
-        feedback->index = static_cast<int32_t>(next_point_index);
+        //feedback->index = static_cast<int32_t>(next_point_index);
         active_goal->setFeedback(feedback);
 
         // check abort
@@ -647,6 +654,7 @@ controller_interface::return_type JointTrajectoryController::update(
     if (has_position_command_interface_)
     {
       assign_interface_from_point(joint_command_interface_[0], last_commanded_state_.positions);
+      log(0, last_commanded_state_.positions);  
     }
     if (has_velocity_command_interface_)
     {
@@ -655,6 +663,7 @@ controller_interface::return_type JointTrajectoryController::update(
         v = 0.0;
       }
       assign_interface_from_point(joint_command_interface_[1], last_commanded_state_.velocities);
+      log(1, last_commanded_state_.velocities);
     }
     if (has_acceleration_command_interface_)
     {
@@ -663,10 +672,12 @@ controller_interface::return_type JointTrajectoryController::update(
         a = 0.0;
       }
       assign_interface_from_point(joint_command_interface_[2], last_commanded_state_.accelerations);
+      log(2, last_commanded_state_.accelerations);
     }
     if (has_effort_command_interface_)
     {
       assign_interface_from_point(joint_command_interface_[3], state_desired_.effort);
+      log(3, state_desired_.effort);
     }
   }
 
@@ -1367,6 +1378,32 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
 
   // Extract the maximum velocity and acceleration from the parameter server
   update_kinematic_limits_from_parameters();
+
+  
+  if(has_position_command_interface_)
+  {
+    rt_logger_[0].reset(new CircularVectorLogBuffer(
+    50000, params_.joints.size() ,
+    "/tmp/" + make_timestamped_filename("rt_log_joint_position_command", ".csv")));
+  }
+  if(has_velocity_command_interface_)
+  {
+    rt_logger_[1].reset(new CircularVectorLogBuffer(
+    50000, params_.joints.size() ,
+    "/tmp/" + make_timestamped_filename("rt_log_joint_velocity_command", ".csv")));
+  }
+  if(has_acceleration_command_interface_)
+  {
+    rt_logger_[2].reset(new CircularVectorLogBuffer(
+    50000, params_.joints.size() ,
+    "/tmp/" + make_timestamped_filename("rt_log_joint_acceleration_command", ".csv")));
+  }
+  if(has_effort_command_interface_)
+  {
+    rt_logger_[3].reset(new CircularVectorLogBuffer(
+    50000, params_.joints.size() ,
+    "/tmp/" + make_timestamped_filename("rt_log_joint_effort_command", ".csv")));
+  }
   
   return CallbackReturn::SUCCESS;
 }
