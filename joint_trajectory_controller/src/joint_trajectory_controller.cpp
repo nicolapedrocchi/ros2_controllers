@@ -337,11 +337,11 @@ controller_interface::return_type JointTrajectoryController::update(
         else
         { 
           auto time_from_start = traj_time_ - current_trajectory_->time_from_start();
-          RCLCPP_INFO(logger, ">>> compute_interval_and_scaling %f %f", trajectory_scaling_.filtered_factor_, time_from_start.seconds());
+          // RCLCPP_INFO(logger, ">>> compute_interval_and_scaling %f %f", trajectory_scaling_.filtered_factor_, time_from_start.seconds());
           std::tie(time_from_start, trajectory_scaling_.feasible_factor_, trajectory_scaling_feasible_derivative, start_segment_itr, end_segment_itr) = trajectory_utils::compute_interval_and_scaling(
             current_trajectory_->get_trajectory_msg(), time_from_start, period, trajectory_scaling_.filtered_factor_, trajectory_scaling_.feasible_factor_, max_velocities_, max_accelerations_);
           traj_time_ = current_trajectory_->time_from_start() + time_from_start;
-          RCLCPP_INFO(logger, "<<< compute_interval_and_scaling %f %f", trajectory_scaling_.feasible_factor_, time_from_start.seconds());
+          // RCLCPP_INFO(logger, "<<< compute_interval_and_scaling %f %f", trajectory_scaling_.feasible_factor_, time_from_start.seconds());
         }
       }
     }
@@ -1629,6 +1629,21 @@ controller_interface::CallbackReturn JointTrajectoryController::on_deactivate(
 
   current_trajectory_.reset();
 
+  for (auto & rt_log : rt_logger_)
+  {
+    if (rt_log)
+    {
+      try
+      {
+        rt_log->flush();
+      }
+      catch (const std::exception & e)
+      {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to flush rt_logger: %s", e.what());
+      }
+    }
+  }
+
   return CallbackReturn::SUCCESS;
 }
 
@@ -2344,9 +2359,9 @@ bool JointTrajectoryController::set_trajectory_scaling_factor(double scaling_fac
       "Scaling factor has to be greater or equal to 0.0 - Ignoring input!");
     return false;
   }
-  RCLCPP_INFO(
-      get_node()->get_logger(),
-      "Scaling factor for trajectory scaling will be %f", scaling_factor);
+  // RCLCPP_INFO(
+      // get_node()->get_logger(),
+      // "Scaling factor for trajectory scaling will be %f", scaling_factor);
 
   trajectory_scaling_.sources_map_.at(idx).store(scaling_factor);
   

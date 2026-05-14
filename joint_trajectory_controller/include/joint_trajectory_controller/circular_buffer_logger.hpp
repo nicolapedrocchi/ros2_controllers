@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -47,13 +48,18 @@ public:
 
   ~CircularVectorLogBuffer() noexcept
   {
+    std::cerr << "[CircularVectorLogBuffer] destructor called for: " << filename_ << std::endl;
     try
     {
       flush();
     }
+    catch (const std::exception & e)
+    {
+      std::cerr << "[CircularVectorLogBuffer] flush() threw in destructor: " << e.what() << std::endl;
+    }
     catch (...)
     {
-      // Never throw from a destructor.
+      std::cerr << "[CircularVectorLogBuffer] flush() threw unknown exception in destructor" << std::endl;
     }
   }
 
@@ -82,12 +88,24 @@ public:
 
   void flush()
   {
+    if (flushed_)
+    {
+      std::cerr << "[CircularVectorLogBuffer] flush() skipped (already flushed): " << filename_ << std::endl;
+      return;
+    }
+
+    std::cerr << "[CircularVectorLogBuffer] flush() entered for: " << filename_
+              << "  (size=" << size_ << ", capacity=" << capacity_ << ")" << std::endl;
+
     std::ofstream file(filename_);
 
     if (!file)
     {
+      std::cerr << "[CircularVectorLogBuffer] ERROR: failed to open file: " << filename_ << std::endl;
       throw std::runtime_error("failed to open file: " + filename_);
     }
+
+    std::cerr << "[CircularVectorLogBuffer] file opened successfully, writing " << size_ << " rows..." << std::endl;
 
     for (std::size_t i = 0; i < size_; ++i)
     {
@@ -105,6 +123,10 @@ public:
 
       file << "\n";
     }
+
+    file.flush();
+    flushed_ = true;
+    std::cerr << "[CircularVectorLogBuffer] flush() completed for: " << filename_ << std::endl;
   }
 
 private:
@@ -125,4 +147,5 @@ private:
   std::size_t write_index_ = 0;
   std::size_t size_ = 0;
   bool full_ = false;
+  bool flushed_ = false;
 };

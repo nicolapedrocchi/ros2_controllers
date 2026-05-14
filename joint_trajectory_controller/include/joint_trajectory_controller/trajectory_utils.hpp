@@ -504,7 +504,7 @@ std::tuple<rclcpp::Duration,double, double, TrajectoryPointConstIter, Trajectory
     // If tau_i is beyond the last trajectory point, nothing to scale — exit.
     if(k_itr == trajectory_msg->points.end())
     {
-      RCLCPP_WARN(rclcpp::get_logger("joint_trajectory_controller"), "tau_i is beyond the last trajectory point.");
+      // RCLCPP_WARN(rclcpp::get_logger("joint_trajectory_controller"), "tau_i is beyond the last trajectory point.");
       break;
     }
     
