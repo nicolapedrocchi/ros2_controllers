@@ -122,6 +122,12 @@ joint_trajectory_controller:
           description: "Max acceleration which overrides the URDF field. Accepted only if less than the URDF value, if present",
         }
 
+  enable_rt_logging: {
+    type: bool,
+    default_value: false,
+    description: "Enable real-time circular-buffer CSV logging of command interfaces to /tmp/. Disabled by default.",
+    read_only: true,
+  }
   allow_partial_joints_goal: {
     type: bool,
     default_value: false,

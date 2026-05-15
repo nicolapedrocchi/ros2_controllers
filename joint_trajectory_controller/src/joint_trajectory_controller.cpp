@@ -1380,29 +1380,32 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
   update_kinematic_limits_from_parameters();
 
   
-  if(has_position_command_interface_)
+  if (params_.enable_rt_logging)
   {
-    rt_logger_[0].reset(new CircularVectorLogBuffer(
-    50000, params_.joints.size() ,
-    "/tmp/" + make_timestamped_filename("rt_log_joint_position_command", ".csv")));
-  }
-  if(has_velocity_command_interface_)
-  {
-    rt_logger_[1].reset(new CircularVectorLogBuffer(
-    50000, params_.joints.size() ,
-    "/tmp/" + make_timestamped_filename("rt_log_joint_velocity_command", ".csv")));
-  }
-  if(has_acceleration_command_interface_)
-  {
-    rt_logger_[2].reset(new CircularVectorLogBuffer(
-    50000, params_.joints.size() ,
-    "/tmp/" + make_timestamped_filename("rt_log_joint_acceleration_command", ".csv")));
-  }
-  if(has_effort_command_interface_)
-  {
-    rt_logger_[3].reset(new CircularVectorLogBuffer(
-    50000, params_.joints.size() ,
-    "/tmp/" + make_timestamped_filename("rt_log_joint_effort_command", ".csv")));
+    if(has_position_command_interface_)
+    {
+      rt_logger_[0].reset(new CircularVectorLogBuffer(
+      50000, params_.joints.size() ,
+      "/tmp/" + make_timestamped_filename("rt_log_joint_position_command", ".csv")));
+    }
+    if(has_velocity_command_interface_)
+    {
+      rt_logger_[1].reset(new CircularVectorLogBuffer(
+      50000, params_.joints.size() ,
+      "/tmp/" + make_timestamped_filename("rt_log_joint_velocity_command", ".csv")));
+    }
+    if(has_acceleration_command_interface_)
+    {
+      rt_logger_[2].reset(new CircularVectorLogBuffer(
+      50000, params_.joints.size() ,
+      "/tmp/" + make_timestamped_filename("rt_log_joint_acceleration_command", ".csv")));
+    }
+    if(has_effort_command_interface_)
+    {
+      rt_logger_[3].reset(new CircularVectorLogBuffer(
+      50000, params_.joints.size() ,
+      "/tmp/" + make_timestamped_filename("rt_log_joint_effort_command", ".csv")));
+    }
   }
   
   return CallbackReturn::SUCCESS;

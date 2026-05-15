@@ -35,7 +35,7 @@ class CircularVectorLogBuffer
 {
 public:
   CircularVectorLogBuffer(std::size_t capacity, std::size_t sample_dim, std::string filename)
-  : filename_(std::move(filename)), capacity_(capacity), sample_dim_(sample_dim)
+  : filename_(std::move(filename)), capacity_(capacity), sample_dim_and_time_(sample_dim+1), start_(std::chrono::system_clock::now())
   {
     if (capacity == 0 || sample_dim == 0)
     {
@@ -43,7 +43,7 @@ public:
     }
 
     // Reserve storage for exactly `capacity` samples, each with `sample_dim` values.
-    buffer_.resize(capacity_ * sample_dim_);
+    buffer_.resize(capacity_ * sample_dim_and_time_);
   }
 
   ~CircularVectorLogBuffer() noexcept
@@ -65,14 +65,17 @@ public:
 
   void add(const double * sample, std::size_t n) noexcept
   {
-    if (n != sample_dim_)
+    if (n != sample_dim_and_time_-1)
     {
       return;
     }
 
-    double * dst = &buffer_[write_index_ * sample_dim_];
+    auto now = std::chrono::system_clock::now();
+    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_).count();
 
-    std::copy(sample, sample + sample_dim_, dst);
+    double * dst = &buffer_[write_index_ * sample_dim_and_time_];
+    dst[0] = static_cast<double>(millis);
+    std::copy(sample, sample + (sample_dim_and_time_-1), dst + 1);
 
     write_index_ = (write_index_ + 1) % capacity_;
 
@@ -107,15 +110,25 @@ public:
 
     std::cerr << "[CircularVectorLogBuffer] file opened successfully, writing " << size_ << " rows..." << std::endl;
 
+    file << std::fixed << std::setprecision(6);
+
     for (std::size_t i = 0; i < size_; ++i)
     {
       const double * sample = get_chronological(i);
 
-      for (std::size_t j = 0; j < sample_dim_; ++j)
+      for (std::size_t j = 0; j < sample_dim_and_time_; ++j)
       {
-        file << sample[j];
+        if (j == 0)
+        {
+          // timestamp column: integer milliseconds, no decimal needed
+          file << std::fixed << std::setprecision(0) << sample[j];
+        }
+        else
+        {
+          file << std::fixed << std::setprecision(9) << sample[j];
+        }
 
-        if (j + 1 < sample_dim_)
+        if (j + 1 < sample_dim_and_time_)
         {
           file << ",";
         }
@@ -134,7 +147,7 @@ private:
   {
     std::size_t start = full_ ? write_index_ : 0;
     std::size_t sample_index = (start + i) % capacity_;
-    return &buffer_[sample_index * sample_dim_];
+    return &buffer_[sample_index * sample_dim_and_time_];
   }
 
   std::vector<double> buffer_;
@@ -142,10 +155,12 @@ private:
   std::string filename_;
 
   std::size_t capacity_;
-  std::size_t sample_dim_;
+  std::size_t sample_dim_and_time_;
 
   std::size_t write_index_ = 0;
   std::size_t size_ = 0;
   bool full_ = false;
   bool flushed_ = false;
+
+  std::chrono::system_clock::time_point start_;
 };

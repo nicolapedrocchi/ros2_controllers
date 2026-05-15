@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <chrono>
 
 #include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "control_msgs/msg/joint_trajectory_controller_state.hpp"
@@ -386,14 +387,14 @@ private:
   std::array<std::shared_ptr<CircularVectorLogBuffer>, 4> rt_logger_;
   void log(std::size_t i, const std::vector<double> & trajectory_point_interface)
   {
+    if (!rt_logger_.at(i)) { return; }
     std::vector<double> log_data;
     log_data.reserve(trajectory_point_interface.size());
     for (size_t index = 0; index < num_cmd_joints_; ++index)
     {
       log_data.push_back(trajectory_point_interface[map_cmd_to_joints_[index]]);
-      
     }
-    rt_logger_.at(i)->add(&log_data[0], trajectory_point_interface.size());   
+    rt_logger_.at(i)->add(&log_data[0], trajectory_point_interface.size());
   }
 };
 
