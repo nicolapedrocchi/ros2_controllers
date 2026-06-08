@@ -3205,3 +3205,53 @@ TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_velocity_command_ra
 
   executor.cancel();
 }
+
+/**
+ * @brief On a path tolerance violation, the commanded trajectory can be ahead of the measured
+ * state. The stop trajectory must not jump the position command back to the lagging measured state,
+ * otherwise position-controlled hardware sees an abrupt stop instead of a deceleration ramp.
+ */
+TEST_F(TrajectoryControllerTest, decelerate_to_hold_position_preserves_command_continuity_on_path_violation)
+{
+  command_interface_types_ = {"position", "velocity"};
+
+  rclcpp::executors::MultiThreadedExecutor executor;
+  constexpr double state_tol = 0.005;
+  constexpr double max_decel = 10.0;
+
+  std::vector<rclcpp::Parameter> params = {
+    rclcpp::Parameter("constraints.joint1.trajectory", state_tol),
+    rclcpp::Parameter("constraints.joint2.trajectory", state_tol),
+    rclcpp::Parameter("constraints.joint3.trajectory", state_tol),
+    rclcpp::Parameter("constraints.joint1.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint2.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.joint3.max_deceleration_on_cancel", max_decel),
+    rclcpp::Parameter("constraints.decelerate_on_cancel", true)};
+
+  // Keep state and command values separate so the measured position lags the moving command stream,
+  // reproducing the path-tolerance-abort case seen on hardware.
+  SetUpAndActivateTrajectoryController(executor, params, true);
+
+  constexpr auto FIRST_POINT_TIME = std::chrono::milliseconds(1000);
+  builtin_interfaces::msg::Duration time_from_start{rclcpp::Duration(FIRST_POINT_TIME)};
+  const std::vector<double> target_position = {
+    INITIAL_POS_JOINTS[0] + 1.0, INITIAL_POS_JOINTS[1] + 1.0,
+    INITIAL_POS_JOINTS[2] + 1.0};
+  publish(time_from_start, {target_position}, rclcpp::Time(0, 0, RCL_STEADY_TIME));
+  traj_controller_->wait_for_trajectory(executor);
+
+  // After the first couple of updates the state error exceeds the tolerance. The stop command
+  // should continue from the last commanded point and then ramp down, not snap back to state.
+  updateControllerAsync(rclcpp::Duration::from_seconds(0.2));
+
+  EXPECT_TRUE(traj_controller_->has_active_traj());
+  EXPECT_TRUE(traj_controller_->has_nontrivial_traj());
+  EXPECT_GT(joint_pos_[0], INITIAL_POS_JOINTS[0] + state_tol);
+  EXPECT_GT(joint_pos_[1], INITIAL_POS_JOINTS[1] + state_tol);
+  EXPECT_GT(joint_pos_[2], INITIAL_POS_JOINTS[2] + state_tol);
+  EXPECT_NEAR(0.0, joint_vel_[0], COMMON_THRESHOLD);
+  EXPECT_NEAR(0.0, joint_vel_[1], COMMON_THRESHOLD);
+  EXPECT_NEAR(0.0, joint_vel_[2], COMMON_THRESHOLD);
+
+  executor.cancel();
+}

@@ -2177,9 +2177,38 @@ JointTrajectoryController::set_hold_position()
 std::shared_ptr<trajectory_msgs::msg::JointTrajectory>
 JointTrajectoryController::decelerate_to_hold_position()
 {
+  const auto has_valid_command_seed =
+    last_commanded_state_.positions.size() >= num_cmd_joints_ &&
+    last_commanded_state_.velocities.size() >= num_cmd_joints_ &&
+    std::all_of(
+      last_commanded_state_.positions.begin(),
+      last_commanded_state_.positions.begin() +
+        static_cast<std::vector<double>::difference_type>(num_cmd_joints_),
+      [](const double value) { return std::isfinite(value); }) &&
+    std::all_of(
+      last_commanded_state_.velocities.begin(),
+      last_commanded_state_.velocities.begin() +
+        static_cast<std::vector<double>::difference_type>(num_cmd_joints_),
+      [](const double value) { return std::isfinite(value); });
+
+  const auto command_seed_is_moving =
+    has_valid_command_seed &&
+    std::any_of(
+      last_commanded_state_.velocities.begin(),
+      last_commanded_state_.velocities.begin() +
+        static_cast<std::vector<double>::difference_type>(num_cmd_joints_),
+      [](const double value) {
+        return std::abs(value) > std::numeric_limits<float>::epsilon();
+      });
+
+  // During path/goal tolerance aborts the measured state can lag behind the command stream.
+  // Seeding the stop at the measured position would step the position command backwards and can
+  // look like a hard stop on position-controlled drives. If the command stream is still moving,
+  // decelerate it continuously; otherwise use measured state, which is safer for unexpected drift.
+  const auto & stop_start_state = command_seed_is_moving ? last_commanded_state_ : state_current_;
   double max_t_stop = 0.0;
-  const auto & p0 = state_current_.positions;
-  const auto & v0 = state_current_.velocities;
+  const auto & p0 = stop_start_state.positions;
+  const auto & v0 = stop_start_state.velocities;
   for (size_t i = 0; i < num_cmd_joints_; ++i)
   {
     stop_direction_[i] = (v0[i] >= 0.0) ? 1.0 : -1.0;
