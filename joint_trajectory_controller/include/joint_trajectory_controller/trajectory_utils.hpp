@@ -323,7 +323,7 @@ double solve_max_ddtau(
       }
       else
       {
-        // Two real roots!
+        // Two real roots
         const double sqrt_disc = std::sqrt(discriminant);
         const double x1 = (-B - sqrt_disc) / (2.0 * A);
         const double x2 = (-B + sqrt_disc) / (2.0 * A);
